@@ -1,0 +1,10 @@
+Brain Model
+Source: NIH 3D, entry 3DPX-002739
+Creator / attribution: Nevit Dilmen
+Source description: Model acquired from Brain MRI
+License: Creative Commons Attribution (CC BY)
+Source URL: https://3d.nih.gov/entries/2739?version=1
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+The distributed GLB was converted from the source STL, centered, indexed,
+smooth-normalized, simplified, and Meshopt-compressed for web delivery.

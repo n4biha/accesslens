@@ -1,157 +1,191 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight } from "lucide-react";
 
-import AssignmentInput from "@/components/AssignmentInput";
-import GoalLockCard from "@/components/GoalLockCard";
-import JourneyTimeline from "@/components/JourneyTimeline";
-import MeasurementStrip from "@/components/MeasurementStrip";
-import { runEngine } from "@/lib/engine";
+import AccessibilityScore, { type AccessibilityScoreData } from "@/components/AccessibilityScore";
+import AppNav from "@/components/AppNav";
+import IntroScreen from "@/components/IntroScreen";
 import {
-  AnalysisUnavailableError,
-  analyzeAssignment,
-  extractObjectives,
-} from "@/lib/analysisSource";
-import type { Analysis, ObjectiveCandidate } from "@/lib/schema";
+  AnalyzeScreen,
+  AnalysisLoadingScreen,
+  BarrierTrace,
+  CompleteScreen,
+  ConstraintTest,
+  GoalLockScreen,
+  JourneyScan,
+  RepairScreen,
+  StudentPreview,
+} from "@/components/WorkflowScreens";
+import {
+  WorkflowProvider,
+  type ConditionId,
+  type WorkflowStage,
+} from "@/components/WorkflowContext";
+import { runEngine } from "@/lib/engine";
+import { shortCitation } from "@/lib/standards";
+import type { FrictionMoment, Step } from "@/lib/schema";
+import { BIOLOGY_SAMPLE, BIOLOGY_TEXT } from "@/samples/biology";
 
-type Stage = "input" | "objective" | "analysis";
+const BIOLOGY_CONFIDENCE: AccessibilityScoreData = {
+  score: 72,
+  breakdown: [
+    { label: "Goal alignment", points: 24 },
+    { label: "Information persistence", points: 12 },
+    { label: "Interaction flexibility", points: 12 },
+    { label: "Timing flexibility", points: 10 },
+    { label: "Response options", points: 14 },
+  ],
+};
+
+const STATUS_LABEL: Record<WorkflowStage, string> = {
+  intro: "AccessLens introduction",
+  analyze: "New analysis",
+  loading: "Analyzing the task",
+  goal: "Learning goal review",
+  journey: "Journey scan complete",
+  barrier: "Reviewing a friction moment",
+  repair: "Reviewing repairs",
+  constraint: "Testing access conditions",
+  preview: "Student preview",
+  complete: "Analysis complete",
+};
 
 export default function Home() {
-  const [stage, setStage] = useState<Stage>("input");
-  const [assignmentText, setAssignmentText] = useState("");
-  const [candidates, setCandidates] = useState<ObjectiveCandidate[]>([]);
-  const [lockedObjective, setLockedObjective] = useState("");
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
+  const [stage, setStage] = useState<WorkflowStage>("intro");
+  const [assignmentDraft, setAssignmentDraft] = useState(BIOLOGY_TEXT);
+  const [objective, setObjective] = useState(BIOLOGY_SAMPLE.objectives[0].text);
+  const [steps, setSteps] = useState<Step[]>(BIOLOGY_SAMPLE.analysis.steps);
+  const [selectedFriction, setSelectedFriction] = useState<FrictionMoment>(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+  const [condition, setCondition] = useState<ConditionId>("working_memory");
+  const [appliedRepairIds, setAppliedRepairIds] = useState<string[]>([]);
 
-  const report = useMemo(
-    () => (analysis ? runEngine(analysis, assignmentText) : null),
-    [analysis, assignmentText]
+  const analysis = useMemo(
+    () => ({ ...BIOLOGY_SAMPLE.analysis, steps }),
+    [steps],
   );
+  const report = useMemo(() => runEngine(analysis, BIOLOGY_TEXT), [analysis]);
 
-  function describe(err: unknown) {
-    return err instanceof AnalysisUnavailableError
-      ? err.message
-      : "Something went wrong reading that assignment. Try again.";
-  }
+  const selectedStep = useMemo(() => {
+    const matched = selectedFriction.stepIds
+      .map((stepId) => steps.find((step) => step.id === stepId))
+      .filter((step): step is Step => Boolean(step));
+    return matched.find((step) => step.repair !== null) ?? matched[0] ?? steps[0];
+  }, [selectedFriction, steps]);
 
-  async function handleExtract() {
-    setBusy(true);
-    setError(null);
-    try {
-      const objectives = await extractObjectives(assignmentText);
-      setCandidates(objectives);
-      setStage("objective");
-      setStatus("Learning objective found. Review and lock it.");
-    } catch (err) {
-      setError(describe(err));
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    if (stage === "loading") {
+      const timer = window.setTimeout(() => setStage("goal"), 3100);
+      return () => window.clearTimeout(timer);
     }
+  }, [stage]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      document.querySelector<HTMLElement>("[data-screen-heading]")?.focus({ preventScroll: true });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }, 40);
+    return () => window.clearTimeout(timer);
+  }, [stage]);
+
+  function addRepair(stepId: string) {
+    setAppliedRepairIds((current) => current.includes(stepId) ? current : [...current, stepId]);
   }
 
-  async function handleLock(objective: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await analyzeAssignment(assignmentText, objective);
-      setLockedObjective(objective);
-      setAnalysis(result);
-      setStage("analysis");
-      setStatus(
-        `Analysis complete. ${result.steps.length} steps and ${result.frictionMoments.length} friction moments found.`
-      );
-    } catch (err) {
-      setError(describe(err));
-    } finally {
-      setBusy(false);
-    }
+  function keepCurrent(stepId: string) {
+    setAppliedRepairIds((current) => current.filter((id) => id !== stepId));
   }
 
-  function reset() {
-    setStage("input");
-    setAnalysis(null);
-    setCandidates([]);
-    setLockedObjective("");
-    setError(null);
-    setStatus("");
+  function customizeRepair(stepId: string, suggestion: string) {
+    setSteps((current) => current.map((step) =>
+      step.id === stepId && step.repair
+        ? { ...step, repair: { ...step.repair, suggestion } }
+        : step,
+    ));
+    addRepair(stepId);
+  }
+
+  function submitDemo() {
+    setSteps(BIOLOGY_SAMPLE.analysis.steps);
+    setObjective(BIOLOGY_SAMPLE.objectives[0].text);
+    setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+    setAppliedRepairIds([]);
+    setCondition("working_memory");
+    setStage("loading");
+  }
+
+  function startOver() {
+    setAssignmentDraft(BIOLOGY_TEXT);
+    setObjective(BIOLOGY_SAMPLE.objectives[0].text);
+    setSteps(BIOLOGY_SAMPLE.analysis.steps);
+    setAppliedRepairIds([]);
+    setCondition("working_memory");
+    setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+    setStage("analyze");
+  }
+
+  const workflowActions = useMemo(() => ({
+    goTo: setStage,
+    selectFriction: setSelectedFriction,
+    selectCondition: setCondition,
+    applyRepair: addRepair,
+    startOver,
+  }), []);
+
+  const goalPreserved = appliedRepairIds.every((stepId) => {
+    const repair = steps.find((step) => step.id === stepId)?.repair;
+    return repair?.rigorPreserved !== false;
+  });
+
+  if (stage === "intro") {
+    return <IntroScreen onEnter={() => setStage("analyze")} />;
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-5 py-10">
-      <header className="space-y-2">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">
-          AccessLens
-        </p>
-        <h1 className="text-2xl font-semibold sm:text-3xl">
-          Most accessibility tools test the page. This one tests the task.
-        </h1>
-        <p className="max-w-2xl text-sm leading-relaxed text-muted">
-          Paste an assignment and AccessLens reconstructs what a student actually has
-          to do to finish it, then separates the demands your objective intends from
-          the ones the design added by accident.
-        </p>
-      </header>
+    <WorkflowProvider value={workflowActions}>
+      <div className="app-shell">
+        <AppNav stage={stage} />
+        <p className="sr-only" aria-live="polite">{STATUS_LABEL[stage]}</p>
 
-      <p aria-live="polite" className="sr-only">
-        {status}
-      </p>
-
-      <main className="flex-1 space-y-8">
-        {stage === "input" && (
-          <AssignmentInput
-            value={assignmentText}
-            onChange={setAssignmentText}
-            onSubmit={handleExtract}
-            busy={busy}
-            error={error}
-          />
-        )}
-
-        {stage === "objective" && (
-          <GoalLockCard
-            candidates={candidates}
-            onLock={handleLock}
-            onBack={() => setStage("input")}
-            busy={busy}
-            error={error}
-          />
-        )}
-
-        {stage === "analysis" && analysis && report && (
-          <div className="space-y-8">
-            <section
-              aria-labelledby="locked-heading"
-              className="rounded-lg border border-accent/30 bg-accent-soft p-4"
-            >
-              <h2
-                id="locked-heading"
-                className="text-xs font-semibold uppercase tracking-wide text-muted"
-              >
-                Locked objective
-              </h2>
-              <p className="mt-1.5 font-medium">{lockedObjective}</p>
-              <p className="mt-2 text-sm text-muted">
-                Every judgement below is made against this. Nothing that serves it is
-                treated as a barrier.
-              </p>
-            </section>
-
-            <MeasurementStrip report={report} />
-            <JourneyTimeline analysis={analysis} report={report} />
-
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-lg border border-line-strong px-5 py-2.5 font-medium hover:bg-surface-sunken"
-            >
-              Analyse another assignment
-            </button>
-          </div>
-        )}
-      </main>
-    </div>
+        <div className="screen-enter" key={stage}>
+          {stage === "analyze" && <AnalyzeScreen text={assignmentDraft} onChange={setAssignmentDraft} onSubmit={submitDemo} />}
+          {stage === "loading" && <AnalysisLoadingScreen />}
+          {stage === "goal" && <GoalLockScreen objective={objective} onEdit={setObjective} onLock={() => setStage("journey")} />}
+          {stage === "journey" && (
+            <>
+              <JourneyScan analysis={analysis} report={report} />
+              <section className="journey-bottom">
+                <AccessibilityScore {...BIOLOGY_CONFIDENCE} />
+                <button
+                  type="button"
+                  className="button button--primary"
+                  onClick={() => { setSelectedFriction(analysis.frictionMoments[0]); setStage("barrier"); }}
+                >
+                  Review friction <ArrowRight size={17} aria-hidden="true" />
+                </button>
+              </section>
+            </>
+          )}
+          {stage === "barrier" && (
+            <BarrierTrace
+              assignmentText={BIOLOGY_TEXT}
+              step={selectedStep}
+              friction={selectedFriction}
+              citation={shortCitation(selectedFriction.barrierType)}
+            />
+          )}
+          {stage === "repair" && <RepairScreen steps={steps} onApply={addRepair} onKeep={keepCurrent} onCustomize={customizeRepair} />}
+          {stage === "constraint" && <ConstraintTest key={condition} analysis={analysis} report={report} condition={condition} />}
+          {stage === "preview" && <StudentPreview objective={objective} steps={steps} appliedRepairIds={appliedRepairIds} />}
+          {stage === "complete" && (
+            <CompleteScreen
+              frictionCount={analysis.frictionMoments.length}
+              repairsApplied={appliedRepairIds.length}
+              goalPreserved={goalPreserved}
+            />
+          )}
+        </div>
+      </div>
+    </WorkflowProvider>
   );
 }
