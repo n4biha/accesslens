@@ -137,7 +137,7 @@ ${graph.timeConstraints.map((c) => `- ${c.id}: ${c.limitMinutes} minutes, coveri
 ${graph.frictionMoments.map((f) => `- ${f.id} (${f.severity}, ${f.barrierType}) at ${f.stepIds.join(", ")}: ${f.title}`).join("\n") || "none"}
 </findings>
 
-Work finding by finding. For each one listed above, propose a repair on one of the steps it names, and make that repair's effects address that finding's barrier. A repair whose effects do not move the measurement behind the finding leaves it open, which is worse for the educator than proposing nothing.
+Work finding by finding. A finding is only fixed once its barrier is gone from EVERY step it names, so cover them all: two steps that both require dragging need two repairs, and repairing one leaves the finding open. Make each repair's effects address that finding's barrier. A repair whose effects do not move the measurement behind the finding is worse for the educator than proposing nothing.
 
 What each barrier needs before it can be shown as fixed:
 - working_memory: keepsInfoVisible on the step that produces the information, so it survives without being memorised.
