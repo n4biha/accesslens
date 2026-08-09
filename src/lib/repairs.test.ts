@@ -273,3 +273,76 @@ test("the after-score stops charging only verified resolved findings", () => {
   ).score;
   assert.ok(after > before);
 });
+
+test("an unrelated carried value does not keep a fixed memory finding open", () => {
+  // The finding is about values produced in one tool and needed in another.
+  // A separate value passing through the same step, without crossing an
+  // environment change, is not what the finding is about and must not outvote
+  // the measurement showing the barrier is gone.
+  const source = analysis(
+    [
+      step("setup", { environment: "PhET", produces: ["chamber"] }),
+      step("observe", {
+        environment: "PhET",
+        consumes: ["chamber"],
+        produces: ["v1", "v2", "v3"],
+        producedInfoStaysVisible: false,
+        repairEffects: effects({ keepsInfoVisible: true, reducesWorkingMemory: true }),
+      }),
+      step("quiz", {
+        environment: "Canvas",
+        consumes: ["v1", "v2", "v3"],
+        demands: { contextSwitch: true } as Step["demands"],
+      }),
+    ],
+    [moment({ barrierType: "working_memory", stepIds: ["observe", "quiz"] })]
+  );
+
+  const result = applyRepairs(source, ["observe"]);
+  assert.equal(result.frictionResolutions[0].status, "resolved");
+});
+
+test("restating a time limit is not a timing repair", () => {
+  const source = analysis(
+    [
+      step("quiz", {
+        demands: { timePressure: 3 } as Step["demands"],
+        repairEffects: effects({
+          timeConstraintId: "clock",
+          timeConstraintAction: "set_limit",
+          timeConstraintLimitMinutes: 12,
+        }),
+      }),
+    ],
+    [moment({ barrierType: "time_pressure", stepIds: ["quiz"] })],
+    [{ id: "clock", limitMinutes: 12, stepIds: ["quiz"], evidence: "" }]
+  );
+
+  const result = applyRepairs(source, ["quiz"]);
+  assert.equal(result.analysis.timeConstraints[0].limitMinutes, 12, "the clock is unchanged");
+  assert.notEqual(result.frictionResolutions[0].status, "resolved");
+});
+
+test("a step rated time-pressured with no stated timer cannot block resolution", () => {
+  // The timer covers the quiz only, but the finding also names a step the model
+  // rated pressured with no clock on it. Removing the timer must still resolve
+  // the finding, because no repair can ever move an unbacked rating.
+  const source = analysis(
+    [
+      step("quiz", {
+        demands: { timePressure: 3 } as Step["demands"],
+        repairEffects: effects({
+          timeConstraintId: "clock",
+          timeConstraintAction: "remove",
+        }),
+      }),
+      step("recording", { demands: { timePressure: 3 } as Step["demands"] }),
+    ],
+    [moment({ barrierType: "time_pressure", stepIds: ["quiz", "recording"] })],
+    [{ id: "clock", limitMinutes: 5, stepIds: ["quiz"], evidence: "" }]
+  );
+
+  const result = applyRepairs(source, ["quiz"]);
+  assert.deepEqual(result.analysis.timeConstraints, []);
+  assert.equal(result.frictionResolutions[0].status, "resolved");
+});

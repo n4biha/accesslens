@@ -137,7 +137,16 @@ ${graph.timeConstraints.map((c) => `- ${c.id}: ${c.limitMinutes} minutes, coveri
 ${graph.frictionMoments.map((f) => `- ${f.id} (${f.severity}, ${f.barrierType}) at ${f.stepIds.join(", ")}: ${f.title}`).join("\n") || "none"}
 </findings>
 
-Use only step ids from the list above, and only timer ids from the timers list. Leave out any step that needs no change: a short list of repairs an educator will accept is worth more than one for every step. Every repair must state only the effects its own suggestion delivers.
+Work finding by finding. For each one listed above, propose a repair on one of the steps it names, and make that repair's effects address that finding's barrier. A repair whose effects do not move the measurement behind the finding leaves it open, which is worse for the educator than proposing nothing.
+
+What each barrier needs before it can be shown as fixed:
+- working_memory: keepsInfoVisible on the step that produces the information, so it survives without being memorised.
+- context_switching: replacementEnvironment on a step, naming an environment already used elsewhere in the task. Nothing else consolidates a journey.
+- time_pressure: the timer removed, or set_limit with a limit genuinely LONGER than the current one. Restating the existing limit changes nothing.
+- fine_motor, reading_load, sensory_color_only, sensory_audio_only, single_modality_communication: the matching effect flag.
+- navigation_ambiguity: no measurable demand exists. Propose the repair anyway; it will be recorded as unverified.
+
+Use only step ids from the list above, and only timer ids from the timers list. Beyond covering the findings, leave out any step that needs no change: a short list an educator will accept is worth more than one repair per step. Every repair must state only the effects its own suggestion genuinely delivers.
 
 <assignment>
 ${assignmentText}

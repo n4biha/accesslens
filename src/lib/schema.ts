@@ -129,7 +129,7 @@ export const repairEffectsSchema = z.object({
     .number()
     .nullable()
     .describe(
-      "The replacement limit in minutes when the action is set_limit. Null when the timer is removed or unchanged."
+      "The replacement limit in minutes when the action is set_limit. This is required for set_limit: a new limit with no number cannot be measured and the repair will not count as a timing change. Null only when the timer is removed or unchanged."
     ),
   reducesReadingLoad: z
     .boolean()

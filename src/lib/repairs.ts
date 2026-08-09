@@ -57,12 +57,22 @@ function localBarrierPresent(barrier: BarrierType, steps: readonly Step[]): bool
   }
 }
 
+/**
+ * Whether a memory barrier is still observable at the steps a finding names.
+ *
+ * A finding is about information carried between the steps it names, so both
+ * ends of the carry have to fall inside it. Counting any item that merely
+ * touched one of those steps meant an unrelated value passing through kept the
+ * finding open after the repair had demonstrably worked: peak load fell from
+ * four to one, every value the finding described was visible, and it still
+ * reported that the barrier remained.
+ */
 function memoryPresent(analysis: Analysis, moment: FrictionMoment): boolean {
   const ids = new Set(moment.stepIds);
   const report = analyzeMemory(analysis.steps);
   return (
     report.carried.some(
-      (item) => ids.has(item.producedAtStepId) || ids.has(item.consumedAtStepId)
+      (item) => ids.has(item.producedAtStepId) && ids.has(item.consumedAtStepId)
     ) || report.overCapacityStepIds.some((stepId) => ids.has(stepId))
   );
 }
@@ -74,20 +84,29 @@ function contextTransitions(analysis: Analysis, moment: FrictionMoment): number 
   ).length;
 }
 
+/**
+ * Whether a clock the assignment actually states is still pressing on these
+ * steps.
+ *
+ * Deliberately not the per-step timePressure rating. That rating is the model's
+ * impression of a step, and a step can carry it with no stated timer anywhere
+ * near it, in which case no timer repair can ever move it and the finding stays
+ * open forever. A finding whose steps have no stated timer at all comes back
+ * absent here, which resolutionFor already reports as unverified rather than as
+ * a barrier that was fixed.
+ */
 function timingPresent(analysis: Analysis, moment: FrictionMoment): boolean {
   const ids = new Set(moment.stepIds);
-  const report = analyzeTiming(analysis);
-  const constrained = report.constraints.some(
-    (constraint) =>
-      constraint.stepIds.some((stepId) => ids.has(stepId)) &&
-      constraint.verdict !== "comfortable"
-  );
-  return (
-    constrained ||
-    analysis.steps.some(
-      (step) => ids.has(step.id) && step.demands.timePressure >= 2
-    )
-  );
+  return analyzeTiming(analysis).constraints.some((constraint) => {
+    const covered = constraint.stepIds.filter((stepId) => ids.has(stepId));
+    if (covered.length === 0) return false;
+    if (constraint.verdict !== "comfortable") return true;
+    // A clock the student is still working under counts even where the
+    // arithmetic leaves room, but only for steps the clock actually covers.
+    return analysis.steps.some(
+      (step) => covered.includes(step.id) && step.demands.timePressure >= 2
+    );
+  });
 }
 
 function barrierPresent(analysis: Analysis, moment: FrictionMoment): boolean | null {
@@ -229,11 +248,17 @@ export function applyRepairs(
   const removedConstraintIds = new Set(
     changes.filter((change) => change.action === "remove").map((change) => change.constraintId)
   );
+  // Only a limit that is genuinely longer counts. Restating the existing one is
+  // not a repair, and treating it as one would relax the time pressure on every
+  // step the timer covers while the clock the student sees is unchanged.
+  const currentLimits = new Map(
+    source.timeConstraints.map((constraint) => [constraint.id, constraint.limitMinutes])
+  );
   const replacementLimits = new Map(
     changes.flatMap((change) =>
       change.action === "set_limit" &&
       change.limitMinutes !== null &&
-      change.limitMinutes > 0
+      change.limitMinutes > (currentLimits.get(change.constraintId) ?? 0)
         ? [[change.constraintId, change.limitMinutes] as const]
         : []
     )

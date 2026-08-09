@@ -121,12 +121,30 @@ export function normalizeAnalysisGraph(source: Analysis): NormalizedAnalysis {
   );
   steps = steps.map((step) => {
     if (step.repair === null) return step;
-    const named = step.repair.effects.timeConstraintId;
-    if (named === null || validConstraintIds.has(named)) return step;
+    const { timeConstraintId: named, timeConstraintAction, timeConstraintLimitMinutes } =
+      step.repair.effects;
+    if (named === null) return step;
 
-    // The repair points at a timer this assignment does not have, so the claim
-    // is dropped rather than allowed to clear a constraint by coincidence.
-    warnings.push(`Invalid timer changes were removed from the repair on step "${step.id}".`);
+    // A new limit that is missing, or no longer than the one already imposed,
+    // is not a change anything can measure. Left in place it reads as a timer
+    // repair, counts as one, and then moves nothing, so the finding it belongs
+    // to reports that the repair failed rather than that none addressed it.
+    // The model has proposed replacing a twelve-minute limit with twelve
+    // minutes, so this is not hypothetical.
+    const current = timeConstraints.find((constraint) => constraint.id === named);
+    const uselessLimit =
+      timeConstraintAction === "set_limit" &&
+      (timeConstraintLimitMinutes === null ||
+        timeConstraintLimitMinutes <= 0 ||
+        (current !== undefined && timeConstraintLimitMinutes <= current.limitMinutes));
+
+    if (validConstraintIds.has(named) && !uselessLimit) return step;
+
+    warnings.push(
+      uselessLimit
+        ? `A repair on step "${step.id}" proposed a time limit that is not longer than the current one, so it is not counted as a timing change.`
+        : `Invalid timer changes were removed from the repair on step "${step.id}".`
+    );
     return {
       ...step,
       repair: {
