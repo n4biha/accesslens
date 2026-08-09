@@ -7,6 +7,7 @@ import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import {
   repairClassificationRequestSchema,
   repairSchema,
+  timeConstraintChangesOf,
 } from "@/lib/schema";
 
 export const maxDuration = 60;
@@ -80,7 +81,7 @@ ${parsed.data.suggestion}
 
     const validConstraintIds = new Set(normalized.timeConstraints.map((item) => item.id));
     if (
-      response.parsed_output.effects.timeConstraintChanges.some(
+      timeConstraintChangesOf(response.parsed_output.effects).some(
         (change) => !validConstraintIds.has(change.constraintId)
       )
     ) {

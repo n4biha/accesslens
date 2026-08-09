@@ -29,6 +29,7 @@ import { useWorkflow, type ConditionId } from "@/components/WorkflowContext";
 import { generatePreview } from "@/lib/analysisSource";
 import type { EngineReport } from "@/lib/engine";
 import { locateEvidence } from "@/lib/evidenceGuard";
+import { timeConstraintChangesOf } from "@/lib/schema";
 import type { Analysis, FrictionMoment, GoalRelevance, RepairEffects, RevisedAssignment, Step } from "@/lib/schema";
 
 function ScreenHeading({
@@ -611,7 +612,7 @@ function effectLabels(effects: RepairEffects): string[] {
   if (effects.replacementEnvironment) {
     labels.push(`Moves step to ${effects.replacementEnvironment}`);
   }
-  for (const change of effects.timeConstraintChanges) {
+  for (const change of timeConstraintChangesOf(effects)) {
     labels.push(
       change.action === "remove"
         ? `Removes timer ${change.constraintId}`

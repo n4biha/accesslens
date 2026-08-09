@@ -10,7 +10,9 @@ function effects(partial: Partial<RepairEffects> = {}): RepairEffects {
     keepsInfoVisible: false,
     reducesWorkingMemory: false,
     reducesFineMotor: false,
-    timeConstraintChanges: [],
+    timeConstraintId: null,
+    timeConstraintAction: null,
+    timeConstraintLimitMinutes: null,
     reducesReadingLoad: false,
     addsNonColorCue: false,
     addsCaptionOrTranscript: false,
@@ -137,9 +139,8 @@ test("removing one timer clears its full scope without touching another timer", 
       step("quiz-a", { demands: { timePressure: 3 } as Step["demands"] }),
       step("quiz-b", {
         repairEffects: effects({
-          timeConstraintChanges: [
-            { constraintId: "quiz", action: "remove", limitMinutes: null },
-          ],
+          timeConstraintId: "quiz",
+          timeConstraintAction: "remove",
         }),
         demands: { timePressure: 3 } as Step["demands"],
       }),
@@ -168,7 +169,7 @@ test("a timer can be extended without removing independent constraints", () => {
     [step("a", {
       estimatedMinutes: 2,
       demands: { timePressure: 3 } as Step["demands"],
-      repairEffects: effects({ timeConstraintChanges: [{ constraintId: "clock", action: "set_limit", limitMinutes: 20 }] }),
+      repairEffects: effects({ timeConstraintId: "clock", timeConstraintAction: "set_limit", timeConstraintLimitMinutes: 20 }),
     })],
     [moment({ barrierType: "time_pressure" })],
     [{ id: "clock", limitMinutes: 1, stepIds: ["a"], evidence: "" }]

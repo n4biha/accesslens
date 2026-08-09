@@ -1,4 +1,5 @@
 import { analyzeMemory, analyzeTiming } from "./engine";
+import { timeConstraintChangesOf } from "./schema";
 import type {
   Analysis,
   BarrierType,
@@ -144,7 +145,7 @@ function relevantEffect(
           .map((constraint) => constraint.id)
       );
       return [...effectsByStep.values()].some((effects) =>
-        effects.timeConstraintChanges.some((change) =>
+        timeConstraintChangesOf(effects).some((change) =>
           relevantConstraintIds.has(change.constraintId)
         )
       );
@@ -223,7 +224,7 @@ export function applyRepairs(
   });
 
   const changes = [...effectsByStep.values()].flatMap(
-    (effects) => effects.timeConstraintChanges
+    (effects) => timeConstraintChangesOf(effects)
   );
   const removedConstraintIds = new Set(
     changes.filter((change) => change.action === "remove").map((change) => change.constraintId)

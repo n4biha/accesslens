@@ -121,17 +121,22 @@ export function normalizeAnalysisGraph(source: Analysis): NormalizedAnalysis {
   );
   steps = steps.map((step) => {
     if (step.repair === null) return step;
-    const changes = step.repair.effects.timeConstraintChanges.filter((change) =>
-      validConstraintIds.has(change.constraintId)
-    );
-    if (changes.length !== step.repair.effects.timeConstraintChanges.length) {
-      warnings.push(`Invalid timer changes were removed from the repair on step "${step.id}".`);
-    }
+    const named = step.repair.effects.timeConstraintId;
+    if (named === null || validConstraintIds.has(named)) return step;
+
+    // The repair points at a timer this assignment does not have, so the claim
+    // is dropped rather than allowed to clear a constraint by coincidence.
+    warnings.push(`Invalid timer changes were removed from the repair on step "${step.id}".`);
     return {
       ...step,
       repair: {
         ...step.repair,
-        effects: { ...step.repair.effects, timeConstraintChanges: changes },
+        effects: {
+          ...step.repair.effects,
+          timeConstraintId: null,
+          timeConstraintAction: null,
+          timeConstraintLimitMinutes: null,
+        },
       },
     };
   });

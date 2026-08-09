@@ -5,10 +5,50 @@ import { clampAnalysis } from "@/lib/engine";
 import { verifyEvidence } from "@/lib/evidenceGuard";
 import { normalizeAnalysisGraph } from "@/lib/graphNormalizer";
 import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
-import { analysisRequestSchema, analysisSchema } from "@/lib/schema";
+import {
+  analysisRequestSchema,
+  repairProposalsSchema,
+  taskGraphSchema,
+  type Analysis,
+  type TaskGraph,
+} from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
-export const maxDuration = 60;
+// Two sequential model calls. The default 60s ceiling is not enough for a long
+// assignment, and a timeout here surfaces to the educator as "could not be
+// reached", which is the least useful thing the app can say.
+export const maxDuration = 300;
+
+const CACHED_SYSTEM = [
+  {
+    type: "text" as const,
+    text: SYSTEM_PROMPT,
+    cache_control: { type: "ephemeral" as const, ttl: "1h" as const },
+  },
+];
+
+/** A compact view of the graph, so the repair pass sees the steps it must key against. */
+function describeSteps(graph: TaskGraph): string {
+  return graph.steps
+    .map((step) => {
+      const d = step.demands;
+      const flags = [
+        d.workingMemory >= 2 && `working memory ${d.workingMemory}`,
+        d.fineMotor >= 2 && `fine motor ${d.fineMotor}`,
+        d.timePressure >= 2 && `time pressure ${d.timePressure}`,
+        d.readingLoad >= 2 && `reading load ${d.readingLoad}`,
+        d.contextSwitch && "context switch",
+        d.sensory.colorOnly && "colour only",
+        d.sensory.audioOnly && "audio only",
+        d.communication !== "none" && `responds by ${d.communication}`,
+        !step.producedInfoStaysVisible && step.produces.length > 0 && "produced info disappears",
+      ].filter(Boolean);
+      return `- ${step.id} [${step.goalRelevance}] in ${step.environment}: ${step.action}${
+        flags.length ? `\n    demands: ${flags.join(", ")}` : ""
+      }`;
+    })
+    .join("\n");
+}
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -31,17 +71,14 @@ export async function POST(request: Request) {
   const { assignmentText, lockedObjective } = parsed.data;
 
   try {
-    const response = await getClient().messages.parse({
+    const client = getClient();
+
+    // Pass one: the task graph, without repairs.
+    const graphResponse = await client.messages.parse({
       model: MODEL,
       max_tokens: 16000,
-      system: [
-        {
-          type: "text",
-          text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral", ttl: "1h" },
-        },
-      ],
-      output_config: { effort: "medium", format: zodOutputFormat(analysisSchema) },
+      system: CACHED_SYSTEM,
+      output_config: { effort: "medium", format: zodOutputFormat(taskGraphSchema) },
       messages: [
         {
           role: "user",
@@ -53,7 +90,7 @@ ${lockedObjective}
 
 Decompose the assignment below into the sequence of actions a student performs, and judge every demand against that objective.
 
-Remember: evidence quotes must be copied character-for-character from the assignment; information dependencies drive the working-memory analysis; each independent timer belongs in timeConstraints with its exact step scope; a duration attached to one step belongs in estimatedMinutes; and every repair must state only the effects its own suggestion delivers.
+Remember: evidence quotes must be copied character-for-character from the assignment; information dependencies drive the working-memory analysis; each independent timer belongs in timeConstraints with its exact step scope; and a duration attached to one step belongs in estimatedMinutes.
 
 <assignment>
 ${assignmentText}
@@ -62,14 +99,64 @@ ${assignmentText}
       ],
     });
 
-    if (!response.parsed_output) {
+    const graph = graphResponse.parsed_output;
+    if (!graph) {
       return NextResponse.json(
         { error: "The analysis came back empty. Try again." },
         { status: 502 }
       );
     }
 
-    const normalized = normalizeAnalysisGraph(clampAnalysis(response.parsed_output));
+    // Pass two: repairs for the steps that need one, keyed to the graph above.
+    const repairResponse = await client.messages.parse({
+      model: MODEL,
+      max_tokens: 8000,
+      system: CACHED_SYSTEM,
+      // The hard judgements were made in pass one. This pass writes the
+      // suggestions and states their effects, which does not need the same
+      // reasoning budget and keeps the request inside its time ceiling.
+      output_config: { effort: "low", format: zodOutputFormat(repairProposalsSchema) },
+      messages: [
+        {
+          role: "user",
+          content: `This assignment has already been decomposed. Propose repairs for the steps that impose a demand the locked objective does not require.
+
+<learning_objective>
+${lockedObjective}
+</learning_objective>
+
+<steps>
+${describeSteps(graph)}
+</steps>
+
+<timers>
+${graph.timeConstraints.map((c) => `- ${c.id}: ${c.limitMinutes} minutes, covering ${c.stepIds.join(", ")}`).join("\n") || "none"}
+</timers>
+
+<findings>
+${graph.frictionMoments.map((f) => `- ${f.id} (${f.severity}, ${f.barrierType}) at ${f.stepIds.join(", ")}: ${f.title}`).join("\n") || "none"}
+</findings>
+
+Use only step ids from the list above, and only timer ids from the timers list. Leave out any step that needs no change: a short list of repairs an educator will accept is worth more than one for every step. Every repair must state only the effects its own suggestion delivers.
+
+<assignment>
+${assignmentText}
+</assignment>`,
+        },
+      ],
+    });
+
+    // Steps the repair pass did not name simply keep no repair.
+    const byStep = new Map(
+      (repairResponse.parsed_output?.repairs ?? []).map((entry) => [entry.stepId, entry.repair])
+    );
+    const merged: Analysis = {
+      timeConstraints: graph.timeConstraints,
+      frictionMoments: graph.frictionMoments,
+      steps: graph.steps.map((step) => ({ ...step, repair: byStep.get(step.id) ?? null })),
+    };
+
+    const normalized = normalizeAnalysisGraph(clampAnalysis(merged));
     const checked = verifyEvidence(normalized.analysis, assignmentText);
     if (checked.discarded > 0) {
       console.warn(

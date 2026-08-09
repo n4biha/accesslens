@@ -5,7 +5,9 @@ const NO_EFFECT: RepairEffects = {
   keepsInfoVisible: false,
   reducesWorkingMemory: false,
   reducesFineMotor: false,
-  timeConstraintChanges: [],
+  timeConstraintId: null,
+  timeConstraintAction: null,
+  timeConstraintLimitMinutes: null,
   reducesReadingLoad: false,
   addsNonColorCue: false,
   addsCaptionOrTranscript: false,
@@ -294,9 +296,8 @@ const steps: Step[] = [
         "Remove the twelve-minute quiz limit.",
       effects: {
         ...NO_EFFECT,
-        timeConstraintChanges: [
-          { constraintId: "quiz-timer", action: "remove", limitMinutes: null },
-        ],
+        timeConstraintId: "quiz-timer",
+        timeConstraintAction: "remove",
       },
       barrierReduced: "Processing-speed pressure",
       rigorPreserved: true,

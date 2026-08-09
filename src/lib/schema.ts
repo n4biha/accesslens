@@ -109,23 +109,27 @@ export const repairEffectsSchema = z.object({
     .describe(
       "True when the change offers a route that needs less pointer precision, such as a typed entry instead of a drag."
     ),
-  timeConstraintChanges: z
-    .array(
-      z.object({
-        constraintId: z
-          .string()
-          .describe("The id of the stated timer or deadline this change modifies."),
-        action: z.enum(["remove", "set_limit"]),
-        limitMinutes: z
-          .number()
-          .nullable()
-          .describe(
-            "The replacement limit for set_limit, or null when the constraint is removed."
-          ),
-      })
-    )
+  // Flat rather than a list of change objects. A repair is one concrete change
+  // to one step, so it touches at most one timer, and constrained decoding
+  // compiles a grammar from this schema: nesting an array of objects this deep
+  // pushed the whole analysis past the size the API will accept.
+  timeConstraintId: z
+    .string()
+    .nullable()
     .describe(
-      "Explicit changes to stated timers. Empty when the repair does not change a timer."
+      "The id of the stated timer this repair changes, or null when it does not change a timer."
+    ),
+  timeConstraintAction: z
+    .enum(["remove", "set_limit"])
+    .nullable()
+    .describe(
+      "Whether the timer named above is removed outright or given a new limit. Null when no timer changes."
+    ),
+  timeConstraintLimitMinutes: z
+    .number()
+    .nullable()
+    .describe(
+      "The replacement limit in minutes when the action is set_limit. Null when the timer is removed or unchanged."
     ),
   reducesReadingLoad: z
     .boolean()
@@ -330,6 +334,41 @@ export const revisedAssignmentSchema = z.object({
     .describe("One entry per accepted repair, in the order they appear in the assignment."),
 });
 
+/**
+ * The analysis is requested in two passes because constrained decoding compiles
+ * a grammar from the schema, and the whole task graph in one request exceeds the
+ * size the API accepts. Splitting the repair out of the step is the seam that
+ * fits on both sides: the graph is one call, the repairs are another.
+ *
+ * The two are merged back into `analysisSchema` before anything downstream sees
+ * them, so the engine, the UI and the tests keep working with one shape.
+ */
+export const taskGraphSchema = z.object({
+  timeConstraints: analysisSchema.shape.timeConstraints,
+  steps: z.array(stepSchema.omit({ repair: true })).min(1).describe(
+    "The complete sequence of actions a student performs, in order, from opening the assignment to submitting it. Never empty: every assignment has at least one step."
+  ),
+  frictionMoments: analysisSchema.shape.frictionMoments,
+});
+
+export const repairProposalsSchema = z.object({
+  repairs: z
+    .array(
+      z.object({
+        stepId: z
+          .string()
+          .describe("The id of the step this repair changes, exactly as given."),
+        repair: repairSchema,
+      })
+    )
+    .describe(
+      "One entry for each step that needs a repair. Steps that need no change are simply left out."
+    ),
+});
+
+export type TaskGraph = z.infer<typeof taskGraphSchema>;
+export type RepairProposals = z.infer<typeof repairProposalsSchema>;
+
 export const objectiveRequestSchema = z.object({
   assignmentText: z.string().trim().min(40),
 });
@@ -360,6 +399,30 @@ export type RevisedAssignment = z.infer<typeof revisedAssignmentSchema>;
 export type Demands = z.infer<typeof demandsSchema>;
 export type Repair = z.infer<typeof repairSchema>;
 export type RepairEffects = z.infer<typeof repairEffectsSchema>;
+
+export interface TimeConstraintChange {
+  constraintId: string;
+  action: "remove" | "set_limit";
+  limitMinutes: number | null;
+}
+
+/**
+ * The timer change a repair states, as a list so callers can treat "no timer
+ * touched" and "one timer touched" the same way. The schema carries the fields
+ * flat to keep the compiled grammar small; this is the shape to reason with.
+ */
+export function timeConstraintChangesOf(
+  effects: RepairEffects
+): TimeConstraintChange[] {
+  if (!effects.timeConstraintId || effects.timeConstraintAction === null) return [];
+  return [
+    {
+      constraintId: effects.timeConstraintId,
+      action: effects.timeConstraintAction,
+      limitMinutes: effects.timeConstraintLimitMinutes,
+    },
+  ];
+}
 export type Step = z.infer<typeof stepSchema>;
 export type FrictionMoment = z.infer<typeof frictionMomentSchema>;
 export type TimeConstraint = z.infer<typeof timeConstraintSchema>;
