@@ -166,23 +166,51 @@ export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) 
   );
 }
 
-const LOADING_MESSAGES = [
-  "Understanding the learning goal…",
-  "Breaking the task into student actions…",
-  "Mapping functional demands…",
-  "Tracing accessibility friction…",
-  "Comparing demands with the learning goal…",
-  "Preparing recommendations…",
-];
+/**
+ * Two passes run against the model, and they do different work. Showing the
+ * same six messages for both made the first pass claim it had traced friction
+ * and prepared recommendations when it had only read the assignment — and then
+ * Goal Lock asked the educator to confirm a goal the app implied it had already
+ * finished working from.
+ */
+const PHASE_COPY = {
+  objective: {
+    eyebrow: "Step 1 of 2 · reading the assignment",
+    messages: [
+      "Reading the assignment…",
+      "Working out what it is meant to teach…",
+    ],
+    /** Objective extraction usually returns in a few seconds. */
+    cadenceMs: 1800,
+  },
+  analysis: {
+    eyebrow: "Step 2 of 2 · reading the task as a journey",
+    messages: [
+      "Breaking the task into student actions…",
+      "Mapping functional demands…",
+      "Tracing accessibility friction…",
+      "Comparing demands with the learning goal…",
+      "Preparing recommendations…",
+    ],
+    /** The full analysis runs far longer, so the messages are paced to match. */
+    cadenceMs: 7000,
+  },
+} as const;
 
-export function AnalysisLoadingScreen() {
+export type LoadingPhase = keyof typeof PHASE_COPY;
+
+export function AnalysisLoadingScreen({ phase = "analysis" }: { phase?: LoadingPhase }) {
+  const { eyebrow, messages, cadenceMs } = PHASE_COPY[phase];
   const [messageIndex, setMessageIndex] = useState(0);
+
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setMessageIndex((current) => Math.min(current + 1, LOADING_MESSAGES.length - 1));
-    }, 500);
+      setMessageIndex((current) => Math.min(current + 1, messages.length - 1));
+    }, cadenceMs);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [messages.length, cadenceMs]);
+
+  const onLastMessage = messageIndex === messages.length - 1;
 
   return (
     <main className="loading-screen" aria-live="polite" aria-busy="true">
@@ -190,9 +218,13 @@ export function AnalysisLoadingScreen() {
         <span />
         <i /><i /><i /><i />
       </div>
-      <p className="eyebrow">Reading the task as a journey</p>
-      <h1 data-screen-heading tabIndex={-1}>{LOADING_MESSAGES[messageIndex]}</h1>
-      <p>Step {messageIndex + 1} of {LOADING_MESSAGES.length}</p>
+      <p className="eyebrow">{eyebrow}</p>
+      <h1 data-screen-heading tabIndex={-1}>{messages[messageIndex]}</h1>
+      <p>
+        {onLastMessage
+          ? "Still working — larger assignments take longer."
+          : `${messageIndex + 1} of ${messages.length}`}
+      </p>
     </main>
   );
 }
@@ -259,6 +291,42 @@ const SEVERITY_LABEL = { high: "High", medium: "Moderate", low: "Low" } as const
 
 export interface JourneyScanProps { analysis: Analysis; report: EngineReport }
 
+/**
+ * Steps are written in the third person for the educator ("Reads the
+ * instructions"). Nodes need a short imperative instead, so the verb is
+ * converted rather than stripped — dropping it leaves fragments like
+ * "the assignment instructions in Canvas".
+ */
+function toImperative(verb: string): string {
+  if (/ies$/i.test(verb)) return verb.slice(0, -3) + "y"; // tries -> try
+  if (/(ch|sh|ss|x|z)es$/i.test(verb)) return verb.slice(0, -2); // watches -> watch
+  if (/[^s]s$/i.test(verb)) return verb.slice(0, -1); // observes -> observe
+  return verb;
+}
+
+function nodeLabel(action: string): string {
+  const words = action.trim().split(/\s+/);
+  if (words.length === 0) return action;
+
+  words[0] = toImperative(words[0]);
+  // "Opens and reads the article" -> "Open and read the article"
+  const andIndex = words.findIndex((word, i) => i > 0 && word.toLowerCase() === "and");
+  if (andIndex > 0 && words[andIndex + 1]) {
+    words[andIndex + 1] = toImperative(words[andIndex + 1]);
+  }
+
+  const clipped = words.length > 5;
+  const kept = clipped ? words.slice(0, 5) : [...words];
+
+  // Trailing prepositions and articles read badly before an ellipsis
+  // ("Read the assignment instructions in…"), so drop them.
+  const DANGLING = /^(in|into|on|at|to|from|with|and|the|a|an|of|for|by|as)$/i;
+  while (clipped && kept.length > 2 && DANGLING.test(kept[kept.length - 1])) kept.pop();
+
+  const label = kept.join(" ").replace(/[,;:]$/, "");
+  return label.charAt(0).toUpperCase() + label.slice(1) + (clipped ? "…" : "");
+}
+
 export function JourneyScan({ analysis, report }: JourneyScanProps) {
   const { goTo, selectFriction } = useWorkflow();
   const frictionByStep = useMemo(() => {
@@ -301,7 +369,7 @@ export function JourneyScan({ analysis, report }: JourneyScanProps) {
                 </div>
                 <button type="button" className="journey-node" aria-describedby={`tooltip-${step.id}`}>
                   <span className="node-number">{index + 1}</span>
-                  <span className="node-label">{step.action.replace(/^(Reads|Opens|Adjusts|Drags|Observes|Closes|Locates|Enters|Answers|Records|Submits)\s+/i, "")}</span>
+                  <span className="node-label">{nodeLabel(step.action)}</span>
                 </button>
                 <div className="journey-tooltip" id={`tooltip-${step.id}`} role="tooltip">
                   <strong>{step.environment}</strong>
@@ -370,6 +438,7 @@ export function BarrierTrace({ assignmentText, step, friction, citation }: Barri
           </dl>
           <p className="citation"><BookOpen size={15} aria-hidden="true" /> {citation}</p>
           <div className="barrier-actions">
+            <button type="button" className="button button--secondary" onClick={() => goTo("journey")}><ArrowLeft size={16} aria-hidden="true" /> Back to journey</button>
             <button type="button" className="button button--primary" onClick={() => { applyRepair(step.id); goTo("repair"); }}><Check size={16} aria-hidden="true" /> Apply repair</button>
             <button type="button" className="button button--secondary" onClick={() => goTo("preview")}>View student preview <ChevronRight size={16} aria-hidden="true" /></button>
           </div>
@@ -458,6 +527,7 @@ export function RepairScreen({ steps, onApply, onKeep, onCustomize }: RepairScre
       </div>
       <div className="sticky-action-bar">
         <p><strong>{reviewed}</strong> of {repairSteps.length} barriers reviewed <span aria-hidden="true">·</span> <strong>{ready}</strong> repairs ready</p>
+        <button type="button" className="button button--secondary" onClick={() => goTo("barrier")}><ArrowLeft size={16} aria-hidden="true" /> Back to friction</button>
         <ArrowButton onClick={() => goTo("constraint")} disabled={reviewed === 0}>Continue to testing</ArrowButton>
       </div>
     </main>
@@ -561,7 +631,7 @@ export function ConstraintTest({ analysis, report, condition }: ConstraintTestPr
           <dl className="compact-metrics"><div><dt>Task environments</dt><dd>{report.switching.uniqueEnvironments.length}</dd></div><div><dt>Time limit</dt><dd>{report.timing.timeLimitMinutes ?? "None"}{report.timing.timeLimitMinutes ? " min" : ""}</dd></div></dl>
         </aside>
       </div>
-      <div className="screen-footer-actions"><button type="button" className="button button--secondary" onClick={() => selectCondition(CONDITIONS[0].id)}>Run another test</button><ArrowButton onClick={() => goTo("preview")}>Continue</ArrowButton></div>
+      <div className="screen-footer-actions"><button type="button" className="button button--secondary" onClick={() => goTo("repair")}><ArrowLeft size={16} aria-hidden="true" /> Back to repairs</button><button type="button" className="button button--secondary" onClick={() => selectCondition(CONDITIONS[0].id)}>Run another test</button><ArrowButton onClick={() => goTo("preview")}>Continue</ArrowButton></div>
     </main>
   );
 }

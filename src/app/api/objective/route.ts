@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 
 import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { LIGHT_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import { objectiveExtractionSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  const rate = checkRateLimit(request, "objective", LIGHT_LIMIT);
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: rate.message },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+    );
+  }
+
   let assignmentText: string;
   try {
     ({ assignmentText } = await request.json());

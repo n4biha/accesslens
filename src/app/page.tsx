@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
 import AccessibilityScore from "@/components/AccessibilityScore";
@@ -16,6 +16,7 @@ import {
   JourneyScan,
   RepairScreen,
   StudentPreview,
+  type LoadingPhase,
 } from "@/components/WorkflowScreens";
 import {
   WorkflowProvider,
@@ -67,6 +68,8 @@ export default function Home() {
   const [appliedRepairIds, setAppliedRepairIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [revised, setRevised] = useState<RevisedAssignment | null>(null);
+  const [visited, setVisited] = useState<ReadonlySet<WorkflowStage>>(new Set(["analyze"]));
+  const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>("objective");
 
   const analysis = useMemo(
     () => ({ ...baseAnalysis, steps }),
@@ -108,6 +111,14 @@ export default function Home() {
     addRepair(stepId);
   }
 
+  /** Single entry point for navigation so every arrival is recorded as visited. */
+  const goToStage = useCallback((next: WorkflowStage) => {
+    setStage(next);
+    if (next !== "loading") {
+      setVisited((current) => (current.has(next) ? current : new Set(current).add(next)));
+    }
+  }, []);
+
   /** Reads the assignment and proposes a learning objective for the educator to lock. */
   async function submitAssignment() {
     const text = assignmentDraft;
@@ -115,7 +126,8 @@ export default function Home() {
     setAppliedRepairIds([]);
     setRevised(null);
     setCondition("working_memory");
-    setStage("loading");
+    setLoadingPhase("objective");
+    goToStage("loading");
 
     try {
       const [objectives] = await Promise.all([
@@ -124,10 +136,10 @@ export default function Home() {
       ]);
       setAnalyzedText(text);
       setObjective(objectives[0]?.text ?? "");
-      setStage("goal");
+      goToStage("goal");
     } catch (err) {
       setError(describeError(err));
-      setStage("analyze");
+      goToStage("analyze");
     }
   }
 
@@ -135,7 +147,8 @@ export default function Home() {
   async function lockAndAnalyze(lockedObjective: string) {
     setObjective(lockedObjective);
     setError(null);
-    setStage("loading");
+    setLoadingPhase("analysis");
+    goToStage("loading");
 
     try {
       const [result] = await Promise.all([
@@ -145,10 +158,10 @@ export default function Home() {
       setBaseAnalysis(result);
       setSteps(result.steps);
       setSelectedFriction(result.frictionMoments[0] ?? BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
-      setStage("journey");
+      goToStage("journey");
     } catch (err) {
       setError(describeError(err));
-      setStage("goal");
+      goToStage("goal");
     }
   }
 
@@ -160,7 +173,7 @@ export default function Home() {
     );
   }
 
-  function startOver() {
+  const startOver = useCallback(() => {
     setAssignmentDraft(BIOLOGY_TEXT);
     setAnalyzedText(BIOLOGY_TEXT);
     setObjective(BIOLOGY_SAMPLE.objectives[0].text);
@@ -171,16 +184,16 @@ export default function Home() {
     setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
     setError(null);
     setRevised(null);
-    setStage("analyze");
-  }
+    goToStage("analyze");
+  }, [goToStage]);
 
   const workflowActions = useMemo(() => ({
-    goTo: setStage,
+    goTo: goToStage,
     selectFriction: setSelectedFriction,
     selectCondition: setCondition,
     applyRepair: addRepair,
     startOver,
-  }), []);
+  }), [goToStage, startOver]);
 
   const goalPreserved = appliedRepairIds.every((stepId) => {
     const repair = steps.find((step) => step.id === stepId)?.repair;
@@ -188,13 +201,13 @@ export default function Home() {
   });
 
   if (stage === "intro") {
-    return <IntroScreen onEnter={() => setStage("analyze")} />;
+    return <IntroScreen onEnter={() => goToStage("analyze")} />;
   }
 
   return (
     <WorkflowProvider value={workflowActions}>
       <div className="app-shell">
-        <AppNav stage={stage} />
+        <AppNav stage={stage} visited={visited} onNavigate={goToStage} />
         <p className="sr-only" aria-live="polite">{STATUS_LABEL[stage]}</p>
 
         {error && (
@@ -205,7 +218,7 @@ export default function Home() {
 
         <div className="screen-enter" key={stage}>
           {stage === "analyze" && <AnalyzeScreen text={assignmentDraft} onChange={setAssignmentDraft} onSubmit={submitAssignment} />}
-          {stage === "loading" && <AnalysisLoadingScreen />}
+          {stage === "loading" && <AnalysisLoadingScreen phase={loadingPhase} />}
           {stage === "goal" && <GoalLockScreen objective={objective} onEdit={setObjective} onLock={() => lockAndAnalyze(objective)} />}
           {stage === "journey" && (
             <>
@@ -215,7 +228,7 @@ export default function Home() {
                 <button
                   type="button"
                   className="button button--primary"
-                  onClick={() => { setSelectedFriction(analysis.frictionMoments[0]); setStage("barrier"); }}
+                  onClick={() => { setSelectedFriction(analysis.frictionMoments[0]); goToStage("barrier"); }}
                 >
                   Review friction <ArrowRight size={17} aria-hidden="true" />
                 </button>

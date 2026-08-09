@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import { revisedAssignmentSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
@@ -13,6 +14,14 @@ interface AcceptedRepair {
 }
 
 export async function POST(request: Request) {
+  const rate = checkRateLimit(request, "preview", ANALYSIS_LIMIT);
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: rate.message },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+    );
+  }
+
   let assignmentText: string;
   let lockedObjective: string;
   let repairs: AcceptedRepair[];

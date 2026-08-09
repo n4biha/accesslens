@@ -1,15 +1,60 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import { getImageProps } from "next/image";
 import { ArrowRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type IntroPhase = "blackout" | "brain" | "hold" | "lift" | "message" | "ready";
+type IntroPhase =
+  | "idle"
+  | "artwork"
+  | "lens"
+  | "headline"
+  | "description"
+  | "actions"
+  | "ready";
 
-const BrainScene = dynamic(() => import("@/components/BrainScene"), {
-  ssr: false,
-  loading: () => <div className="brain-placeholder" />,
+const heroImageCommon = { alt: "", sizes: "100vw" } as const;
+const {
+  props: { srcSet: desktopHeroSrcSet, ...desktopHeroProps },
+} = getImageProps({
+  ...heroImageCommon,
+  src: "/accesslens-hero-v2.png",
+  width: 1672,
+  height: 941,
 });
+const {
+  props: { srcSet: mobileHeroSrcSet },
+} = getImageProps({
+  ...heroImageCommon,
+  src: "/accesslens-hero-mobile.png",
+  width: 941,
+  height: 1672,
+});
+
+function ResponsiveHeroImage({
+  eager = false,
+  onLoad,
+  onError,
+}: {
+  eager?: boolean;
+  onLoad?: () => void;
+  onError?: () => void;
+}) {
+  return (
+    <picture>
+      <source media="(max-width: 800px)" srcSet={mobileHeroSrcSet} />
+      <img
+        {...desktopHeroProps}
+        alt=""
+        srcSet={desktopHeroSrcSet}
+        loading={eager ? "eager" : "lazy"}
+        fetchPriority={eager ? "high" : "auto"}
+        onLoad={onLoad}
+        onError={onError}
+      />
+    </picture>
+  );
+}
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(() =>
@@ -29,8 +74,10 @@ function useReducedMotion() {
 }
 
 export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
-  const [phase, setPhase] = useState<IntroPhase>("blackout");
+  const [phase, setPhase] = useState<IntroPhase>("idle");
   const [sequenceComplete, setSequenceComplete] = useState(false);
+  const [assetSettled, setAssetSettled] = useState(false);
+  const [instant, setInstant] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const reducedMotion = useReducedMotion();
   const sequenceStarted = useRef(false);
@@ -44,6 +91,7 @@ export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
   const finishImmediately = useCallback(() => {
     clearTimers();
     sequenceStarted.current = true;
+    setInstant(true);
     setPhase("ready");
     setSequenceComplete(true);
   }, [clearTimers]);
@@ -52,31 +100,33 @@ export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
     if (sequenceStarted.current) return;
     sequenceStarted.current = true;
 
-    if (reducedMotion) {
-      finishImmediately();
-      return;
-    }
-
+    setPhase("artwork");
     timers.current = [
-      window.setTimeout(() => setPhase("brain"), 450),
-      window.setTimeout(() => setPhase("hold"), 1650),
-      window.setTimeout(() => setPhase("lift"), 2150),
-      window.setTimeout(() => setPhase("message"), 3250),
-      window.setTimeout(() => setPhase("ready"), 4050),
-      window.setTimeout(() => setSequenceComplete(true), 4850),
+      window.setTimeout(() => setPhase("lens"), 650),
+      window.setTimeout(() => setPhase("headline"), 1200),
+      window.setTimeout(() => setPhase("description"), 1800),
+      window.setTimeout(() => setPhase("actions"), 2400),
+      window.setTimeout(() => {
+        setPhase("ready");
+        setSequenceComplete(true);
+      }, 3300),
     ];
-  }, [finishImmediately, reducedMotion]);
+  }, []);
 
   useEffect(() => {
-    if (!reducedMotion) return;
-    const timer = window.setTimeout(finishImmediately, 0);
-    return () => window.clearTimeout(timer);
-  }, [finishImmediately, reducedMotion]);
+    if (!reducedMotion && !assetSettled) return;
+
+    const startTimer = window.setTimeout(
+      reducedMotion ? finishImmediately : beginSequence,
+      0,
+    );
+    return () => window.clearTimeout(startTimer);
+  }, [assetSettled, beginSequence, finishImmediately, reducedMotion]);
 
   useEffect(() => {
-    const fallbackTimer = window.setTimeout(beginSequence, 2500);
+    const fallbackTimer = window.setTimeout(() => setAssetSettled(true), 1200);
     return () => window.clearTimeout(fallbackTimer);
-  }, [beginSequence]);
+  }, []);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
@@ -91,19 +141,32 @@ export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
   function enter() {
     if (!sequenceComplete) return;
     setLeaving(true);
-    window.setTimeout(onEnter, reducedMotion ? 80 : 620);
+    window.setTimeout(onEnter, reducedMotion ? 80 : 680);
   }
 
   return (
     <main
-      className={`intro-screen intro-screen--cinematic ${sequenceComplete ? "is-sequence-complete" : ""} ${leaving ? "is-leaving" : ""}`}
+      className={`intro-screen intro-screen--lens ${sequenceComplete ? "is-sequence-complete" : ""} ${instant ? "is-instant" : ""} ${leaving ? "is-leaving" : ""}`}
       data-phase={phase}
       aria-busy={!sequenceComplete}
     >
-      <div className="intro-atmosphere" aria-hidden="true" />
-      <div className="brain-stage">
-        <BrainScene interactive={sequenceComplete} onReady={beginSequence} />
+      <div className="intro-artwork" aria-hidden="true">
+        <div className="intro-artwork-layer intro-artwork-layer--soft">
+          <ResponsiveHeroImage
+            eager
+            onLoad={() => setAssetSettled(true)}
+            onError={() => setAssetSettled(true)}
+          />
+        </div>
+        <div className="intro-artwork-layer intro-artwork-layer--clear">
+          <ResponsiveHeroImage />
+        </div>
+        <div className="intro-optical-bloom" />
+        <div className="intro-light-sweep" />
+        <div className="intro-artwork-shade" />
+        <div className="intro-film-grain" />
       </div>
+
       <div className="intro-copy" aria-hidden={!sequenceComplete}>
         <p className="intro-kicker">AccessLens</p>
         <h1 data-screen-heading tabIndex={sequenceComplete ? -1 : undefined}>
@@ -125,19 +188,8 @@ export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
           <ArrowRight size={18} aria-hidden="true" />
         </button>
         <p className="intro-footnote">Accessibility preflight for digital learning</p>
-        <p className="brain-credit">
-          3D anatomy:{" "}
-          <a
-            href="https://3d.nih.gov/entries/2739?version=1"
-            target="_blank"
-            rel="noreferrer"
-            tabIndex={sequenceComplete ? 0 : -1}
-          >
-            Nevit Dilmen / NIH 3D
-          </a>{" "}
-          · CC BY
-        </p>
       </div>
+
       <p className="sr-only" aria-live="polite">
         {sequenceComplete
           ? "AccessLens is ready. Remove the barrier. Keep the challenge. Analyze a task."
