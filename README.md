@@ -233,18 +233,6 @@ Ordered by how often educators asked for it, not by how hard it is to build.
 
 ---
 
-## Limitations
-
-Worth saying plainly, because a tool that overstates its confidence is worse than no tool.
-
-- It reads the assignment text. It cannot inspect the software the assignment sends students into, so it will not know whether a specific simulation supports keyboard input. Where the task graph cannot answer a question, the interface says so rather than guessing.
-- Step duration is counted only where the assignment states it. A task whose length is implied rather than written may take longer than the estimate.
-- The action time model is coarse. A step is worth 30 seconds plus fixed allowances for precision and response, so "answer six analysis questions" is undercounted. It errs toward understating friction rather than inventing it.
-- The score reflects task-level friction. It is not a WCAG conformance score and does not substitute for a compliance audit.
-- Goal relevance is a judgement. The model marks steps `essential`, `related`, `incidental` or `unknown`, prefers `unknown` when genuinely ambiguous, and every call is visible and overridable. The educator decides.
-
----
-
 ## References
 
 - Altmann, E. M., & Trafton, J. G. (2002). Memory for goals: An activation-based model. *Cognitive Science*, 26(1).
