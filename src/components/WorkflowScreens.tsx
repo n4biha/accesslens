@@ -728,11 +728,22 @@ export function RepairScreen({ steps, appliedRepairIds, onApply, onKeep, onCusto
   );
 }
 
+/**
+ * What the engine measured for the graph being tested. Conditions that have a
+ * real measurement behind them use it instead of the model's per-step rating:
+ * a rating is an impression of one step in isolation, and reading instructions
+ * was being failed for working memory on that basis alone.
+ */
+export interface ConditionContext {
+  memory: EngineReport["memory"];
+  timing: EngineReport["timing"];
+}
+
 interface ConditionDefinition {
   id: ConditionId;
   label: string;
   icon: typeof CircleGauge;
-  fails: (step: Step) => boolean;
+  fails: (step: Step, context: ConditionContext) => boolean;
   /** Set when the task graph carries nothing that answers this condition. The
    *  screen then says so rather than reporting a result it cannot support. */
   unavailable?: boolean;
@@ -741,7 +752,23 @@ interface ConditionDefinition {
 }
 
 export const CONDITIONS: ConditionDefinition[] = [
-  { id: "working_memory", label: "Reduced working-memory dependency", icon: CircleGauge, fails: (step) => step.demands.workingMemory >= 2 },
+  {
+    id: "working_memory",
+    label: "Reduced working-memory dependency",
+    icon: CircleGauge,
+    // Measured by the liveness pass, not by the step's own rating.
+    //
+    // The threshold is two rather than one. This condition asks what happens to
+    // a student whose working memory is reduced, so it has to sit below the
+    // ~4-chunk typical capacity (Cowan, 2001) without firing on every step: one
+    // idea carried through a task is ordinary, and counting it failed nine
+    // steps out of eleven and told the educator nothing. Producing information
+    // that disappears fails on its own, because that is what forces the student
+    // to memorise or transcribe it.
+    fails: (step, { memory }) =>
+      (memory.perStep.find((entry) => entry.stepId === step.id)?.load ?? 0) >= 2 ||
+      (step.produces.length > 0 && !step.producedInfoStaysVisible),
+  },
   // Whether a step has a keyboard route is a property of the software, and
   // nothing in the task graph records it. Motor difficulty is a different
   // question, so reusing that answer here would be a guess wearing a label.
@@ -758,7 +785,16 @@ export const CONDITIONS: ConditionDefinition[] = [
   { id: "no_spoken", label: "No spoken response", icon: Mic, fails: (step) => step.demands.communication === "spoken" },
   { id: "no_audio", label: "No audio", icon: Volume2, fails: (step) => step.demands.sensory.audioOnly },
   { id: "no_color", label: "No color information", icon: Sparkles, fails: (step) => step.demands.sensory.colorOnly },
-  { id: "processing_time", label: "Additional processing time", icon: Clock3, fails: (step) => step.demands.timePressure >= 2 },
+  {
+    id: "processing_time",
+    label: "Additional processing time",
+    icon: Clock3,
+    // A step fails when a timer the assignment actually states is running
+    // during it. A step rated pressured with no stated clock is the model's
+    // impression, and no repair could ever clear it.
+    fails: (step, { timing }) =>
+      timing.constraints.some((constraint) => constraint.stepIds.includes(step.id)),
+  },
   {
     id: "reduced_motion",
     label: "Reduced motion",
@@ -784,7 +820,15 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, repairedRep
   const selected = CONDITIONS.find((item) => item.id === condition) ?? CONDITIONS[0];
   const unavailable = selected.unavailable === true;
   const [visibleCount, setVisibleCount] = useState(0);
-  const failedSteps = analysis.steps.filter(selected.fails);
+
+  // Each graph is judged against its own measurements, so a repair that changes
+  // what the engine measures changes the result rather than only the rating.
+  const base: ConditionContext = { memory: report.memory, timing: report.timing };
+  const after: ConditionContext = {
+    memory: repairedReport.memory,
+    timing: repairedReport.timing,
+  };
+  const failedSteps = analysis.steps.filter((step) => selected.fails(step, base));
 
   // Recomputed, not projected: the repaired graph is run through the same
   // predicate, so a step only reads "PASS after repair" when it genuinely does.
@@ -794,16 +838,16 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, repairedRep
   );
   const stillFailing = failedSteps.filter((step) => {
     const repaired = repairedById.get(step.id);
-    return !repaired || selected.fails(repaired);
+    return !repaired || selected.fails(repaired, after);
   });
   const fixedCount = failedSteps.length - stillFailing.length;
   const focusedStep = stillFailing[0] ?? failedSteps[0] ?? analysis.steps[0];
   const focusedRepaired = focusedStep ? repairedById.get(focusedStep.id) : undefined;
   const focusedFixed = Boolean(
     focusedStep &&
-      selected.fails(focusedStep) &&
+      selected.fails(focusedStep, base) &&
       focusedRepaired &&
-      !selected.fails(focusedRepaired),
+      !selected.fails(focusedRepaired, after),
   );
 
   useEffect(() => {
@@ -851,9 +895,9 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, repairedRep
           ) : (
             <ol className="test-steps">
               {analysis.steps.map((step, index) => {
-                const fails = selected.fails(step);
+                const fails = selected.fails(step, base);
                 const repaired = repairedById.get(step.id);
-                const fixed = fails && repaired !== undefined && !selected.fails(repaired);
+                const fixed = fails && repaired !== undefined && !selected.fails(repaired, after);
                 return (
                   <li key={step.id} className={index < visibleCount ? "is-visible" : ""}>
                     <span>{index + 1}</span>
