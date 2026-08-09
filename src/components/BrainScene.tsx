@@ -146,18 +146,12 @@ function BrainModel({
     // Meshopt quantization stores the anatomical dimensions on the glTF node.
     // Keep that transform separate: baking it into normalized integer vertices
     // would clamp the model back to a two-unit cube.
-    const geometry = (source.geometry as BufferGeometry).clone();
-    geometry.computeVertexNormals();
-    geometry.normalizeNormals();
-    geometry.computeBoundingSphere();
-
     return {
-      geometry,
+      geometry: source.geometry as BufferGeometry,
       matrix: source.matrixWorld.clone() as Matrix4,
     };
   }, [scene]);
 
-  useEffect(() => () => brainMesh.geometry.dispose(), [brainMesh]);
   useEffect(onReady, [onReady]);
 
   useFrame((state, delta) => {

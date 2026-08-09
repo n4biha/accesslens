@@ -22,7 +22,7 @@ import {
   Upload,
   Volume2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import DemandChips, { chipsForDemands } from "@/components/DemandChips";
 import { useWorkflow, type ConditionId } from "@/components/WorkflowContext";
@@ -64,6 +64,33 @@ export interface AnalyzeScreenProps {
 }
 
 export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [reading, setReading] = useState(false);
+  const [fileNote, setFileNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setReading(true);
+    setFileNote(null);
+    try {
+      const { extractPdfText } = await import("@/lib/pdfText");
+      const extracted = await extractPdfText(file);
+      onChange(extracted);
+      const words = extracted.split(/\s+/).length;
+      setFileNote({ tone: "ok", text: `Read ${words.toLocaleString()} words from ${file.name}. Check it below, then analyse.` });
+    } catch (error) {
+      setFileNote({
+        tone: "error",
+        text: error instanceof Error ? error.message : "That file could not be read.",
+      });
+    } finally {
+      setReading(false);
+    }
+  }
+
   return (
     <main className="workflow-main">
       <ScreenHeading
@@ -78,13 +105,35 @@ export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) 
             <button type="button" role="tab" aria-selected="true" id="assignment-input-heading">
               <FileText size={16} aria-hidden="true" /> Paste text
             </button>
-            <button type="button" role="tab" aria-selected="false" disabled>
-              <Upload size={15} aria-hidden="true" /> Upload file <span>Roadmap</span>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              onClick={() => fileInput.current?.click()}
+              disabled={reading}
+            >
+              <Upload size={15} aria-hidden="true" /> {reading ? "Reading PDF…" : "Upload PDF"}
             </button>
             <button type="button" role="tab" aria-selected="false" disabled>
               <Link2 size={15} aria-hidden="true" /> Enter URL <span>Roadmap</span>
             </button>
           </div>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="sr-only"
+            aria-label="Upload a PDF assignment"
+            onChange={handleFile}
+          />
+          {fileNote && (
+            <p
+              className={`file-note ${fileNote.tone === "error" ? "file-note--error" : ""}`}
+              role={fileNote.tone === "error" ? "alert" : "status"}
+            >
+              {fileNote.text}
+            </p>
+          )}
           <label htmlFor="assignment-text" className="sr-only">Assignment text</label>
           <textarea
             id="assignment-text"
@@ -95,7 +144,7 @@ export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) 
           />
           <div className="document-footer">
             <p id="prototype-note">Analysed live · the sample assignment answers instantly</p>
-            <ArrowButton onClick={onSubmit} disabled={text.trim().length === 0}>Analyze task</ArrowButton>
+            <ArrowButton onClick={onSubmit} disabled={text.trim().length === 0 || reading}>Analyze task</ArrowButton>
           </div>
         </section>
 
@@ -522,11 +571,12 @@ export interface StudentPreviewProps {
   steps: Step[];
   appliedRepairIds: string[];
   assignmentText: string;
+  onRevised: (revised: RevisedAssignment) => void;
 }
 
 const ACCESS_TOOLS = ["Chunk instructions", "Keep references visible", "Reduce visual clutter", "Read aloud", "Increase spacing", "Highlight current step"];
 
-export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText }: StudentPreviewProps) {
+export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText, onRevised }: StudentPreviewProps) {
   const { goTo } = useWorkflow();
   const [tools, setTools] = useState<Record<string, boolean>>({ "Keep references visible": true, "Highlight current step": true });
   const [revised, setRevised] = useState<RevisedAssignment | null>(null);
@@ -548,13 +598,17 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
     if (accepted.length === 0) return;
     let cancelled = false;
     generatePreview(assignmentText, objective, accepted)
-      .then((result) => { if (!cancelled) setRevised(result); })
+      .then((result) => {
+        if (cancelled) return;
+        setRevised(result);
+        onRevised(result);
+      })
       .catch((error: unknown) => {
         if (cancelled) return;
         setMessage(error instanceof Error ? error.message : "Could not rewrite the assignment.");
       });
     return () => { cancelled = true; };
-  }, [assignmentText, objective, accepted]);
+  }, [assignmentText, objective, accepted, onRevised]);
 
   const loading = accepted.length > 0 && revised === null && message === "";
 
@@ -630,9 +684,15 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
   );
 }
 
-export interface CompleteScreenProps { frictionCount: number; repairsApplied: number; goalPreserved: boolean }
+export interface CompleteScreenProps {
+  frictionCount: number;
+  repairsApplied: number;
+  goalPreserved: boolean;
+  onExport: () => void;
+  canExport: boolean;
+}
 
-export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved }: CompleteScreenProps) {
+export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved, onExport, canExport }: CompleteScreenProps) {
   const { startOver } = useWorkflow();
   return (
     <main className="complete-screen">
@@ -645,7 +705,15 @@ export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved }:
         <p><span>{frictionCount}</span><small>friction moments reviewed</small></p>
         <p><span>{repairsApplied}</span><small>repairs applied</small></p>
       </div>
-      <div className="complete-actions"><button type="button" className="button button--primary" onClick={() => window.print()}>Export summary <ArrowRight size={16} aria-hidden="true" /></button><button type="button" className="button button--secondary" onClick={startOver}>Start another analysis</button></div>
+      <div className="complete-actions">
+        <button type="button" className="button button--primary" onClick={onExport} disabled={!canExport}>
+          Export revised assignment <ArrowRight size={16} aria-hidden="true" />
+        </button>
+        <button type="button" className="button button--secondary" onClick={startOver}>Start another analysis</button>
+      </div>
+      {!canExport && (
+        <p className="export-hint">Apply a repair and open the student preview to generate the revised assignment.</p>
+      )}
       <p className="educator-note">AccessLens identifies potential task-level accessibility barriers. Educator judgment remains part of every decision.</p>
     </main>
   );

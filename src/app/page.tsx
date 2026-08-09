@@ -29,7 +29,8 @@ import {
   analyzeAssignment,
   extractObjectives,
 } from "@/lib/analysisSource";
-import type { Analysis, FrictionMoment, Step } from "@/lib/schema";
+import { buildSummary, downloadSummary, summaryFilename } from "@/lib/exportSummary";
+import type { Analysis, FrictionMoment, RevisedAssignment, Step } from "@/lib/schema";
 import { BIOLOGY_SAMPLE, BIOLOGY_TEXT } from "@/samples/biology";
 
 /** Keeps the loading sequence readable when a cached sample resolves instantly. */
@@ -65,6 +66,7 @@ export default function Home() {
   const [condition, setCondition] = useState<ConditionId>("working_memory");
   const [appliedRepairIds, setAppliedRepairIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [revised, setRevised] = useState<RevisedAssignment | null>(null);
 
   const analysis = useMemo(
     () => ({ ...baseAnalysis, steps }),
@@ -111,6 +113,7 @@ export default function Home() {
     const text = assignmentDraft;
     setError(null);
     setAppliedRepairIds([]);
+    setRevised(null);
     setCondition("working_memory");
     setStage("loading");
 
@@ -149,6 +152,14 @@ export default function Home() {
     }
   }
 
+  function exportSummary() {
+    if (!revised) return;
+    downloadSummary(
+      summaryFilename(revised.title),
+      buildSummary(revised, objective, analysis, report, confidence.score)
+    );
+  }
+
   function startOver() {
     setAssignmentDraft(BIOLOGY_TEXT);
     setAnalyzedText(BIOLOGY_TEXT);
@@ -159,6 +170,7 @@ export default function Home() {
     setCondition("working_memory");
     setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
     setError(null);
+    setRevised(null);
     setStage("analyze");
   }
 
@@ -226,6 +238,7 @@ export default function Home() {
               steps={steps}
               appliedRepairIds={appliedRepairIds}
               assignmentText={analyzedText}
+              onRevised={setRevised}
             />
           )}
           {stage === "complete" && (
@@ -233,6 +246,8 @@ export default function Home() {
               frictionCount={analysis.frictionMoments.length}
               repairsApplied={appliedRepairIds.length}
               goalPreserved={goalPreserved}
+              canExport={revised !== null}
+              onExport={exportSummary}
             />
           )}
         </div>
