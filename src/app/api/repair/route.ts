@@ -1,7 +1,7 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { NextResponse } from "next/server";
 
-import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { MODEL, SYSTEM_PROMPT, describeModelFailure, getClient } from "@/lib/claude";
 import { normalizeAnalysisGraph } from "@/lib/graphNormalizer";
 import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import {
@@ -97,9 +97,7 @@ ${parsed.data.suggestion}
     });
   } catch (error) {
     console.error("repair classification failed", error);
-    return NextResponse.json(
-      { error: "Could not validate that repair. Try again." },
-      { status: 502 }
-    );
+    const failure = describeModelFailure(error);
+    return NextResponse.json({ error: failure.message }, { status: failure.status });
   }
 }

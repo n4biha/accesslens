@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { MODEL, SYSTEM_PROMPT, describeModelFailure, getClient } from "@/lib/claude";
 import { clampAnalysis } from "@/lib/engine";
 import { verifyEvidence } from "@/lib/evidenceGuard";
 import { normalizeAnalysisGraph } from "@/lib/graphNormalizer";
@@ -173,9 +173,7 @@ ${assignmentText}
     return NextResponse.json({ analysis: checked.analysis, warnings });
   } catch (error) {
     console.error("analysis failed", error);
-    return NextResponse.json(
-      { error: "The analysis service could not be reached. Try again." },
-      { status: 502 }
-    );
+    const failure = describeModelFailure(error);
+    return NextResponse.json({ error: failure.message }, { status: failure.status });
   }
 }

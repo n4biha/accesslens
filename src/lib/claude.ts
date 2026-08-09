@@ -20,6 +20,74 @@ export function getClient(): Anthropic {
   return client;
 }
 
+export interface ModelFailure {
+  status: number;
+  message: string;
+}
+
+/**
+ * Turns a failed model call into something true.
+ *
+ * "The service could not be reached" was the answer to every failure, so an
+ * exhausted credit balance, a missing key and an oversized schema all read as a
+ * network problem. Each one has a different fix and only one of them is worth
+ * retrying, so saying which is the difference between an educator waiting and
+ * an educator acting.
+ */
+export function describeModelFailure(error: unknown): ModelFailure {
+  const status = typeof (error as { status?: unknown })?.status === "number"
+    ? (error as { status: number }).status
+    : 0;
+  const detail = String(
+    (error as { error?: { error?: { message?: unknown } } })?.error?.error?.message ??
+      (error as { message?: unknown })?.message ??
+      ""
+  );
+
+  if (/credit balance is too low/i.test(detail)) {
+    return {
+      status: 402,
+      message:
+        "This demo has run out of API credits. The sample assignment still runs offline, or you can run AccessLens locally with your own key.",
+    };
+  }
+
+  if (status === 401 || /authentication|invalid x-api-key/i.test(detail)) {
+    return {
+      status: 500,
+      message: "The analysis service is not configured with a valid API key.",
+    };
+  }
+
+  if (status === 429) {
+    return {
+      status: 429,
+      message: "The model is busy right now. Wait a moment and try again.",
+    };
+  }
+
+  if (status === 529 || /overloaded/i.test(detail)) {
+    return {
+      status: 503,
+      message: "The model is temporarily overloaded. Try again in a moment.",
+    };
+  }
+
+  // Not an educator's problem to solve, but naming it beats hiding it: this is
+  // the failure that masqueraded as a network error once already.
+  if (/compiled grammar is too large/i.test(detail)) {
+    return {
+      status: 500,
+      message: "The analysis request was rejected as too complex. This is a bug, not your assignment.",
+    };
+  }
+
+  return {
+    status: 502,
+    message: "The analysis service could not be reached. Try again.",
+  };
+}
+
 export const SYSTEM_PROMPT = `You analyse the accessibility of digital learning tasks for AccessLens, a tool used by educators.
 
 Your role is narrow and specific: read an assignment written for students and reconstruct the sequence of actions a student must perform to complete it, recording the functional demands each action imposes. You do not score, rank, or measure anything — separate deterministic code computes every number the educator sees. You do not cite standards — those are looked up from the barrier categories you assign.

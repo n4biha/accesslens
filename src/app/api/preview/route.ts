@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { MODEL, SYSTEM_PROMPT, describeModelFailure, getClient } from "@/lib/claude";
 import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import { previewRequestSchema, revisedAssignmentSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -83,9 +83,7 @@ ${assignmentText}
     return NextResponse.json(response.parsed_output);
   } catch (error) {
     console.error("preview generation failed", error);
-    return NextResponse.json(
-      { error: "Could not generate the revised assignment. Try again." },
-      { status: 502 }
-    );
+    const failure = describeModelFailure(error);
+    return NextResponse.json({ error: failure.message }, { status: failure.status });
   }
 }

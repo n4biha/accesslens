@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { MODEL, SYSTEM_PROMPT, describeModelFailure, getClient } from "@/lib/claude";
 import { LIGHT_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import { objectiveExtractionSchema, objectiveRequestSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -63,9 +63,7 @@ ${assignmentText}
     return NextResponse.json(response.parsed_output);
   } catch (error) {
     console.error("objective extraction failed", error);
-    return NextResponse.json(
-      { error: "The analysis service could not be reached. Try again." },
-      { status: 502 }
-    );
+    const failure = describeModelFailure(error);
+    return NextResponse.json({ error: failure.message }, { status: failure.status });
   }
 }
