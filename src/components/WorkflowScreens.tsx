@@ -29,7 +29,7 @@ import { useWorkflow, type ConditionId } from "@/components/WorkflowContext";
 import { generatePreview } from "@/lib/analysisSource";
 import type { EngineReport } from "@/lib/engine";
 import { locateEvidence } from "@/lib/evidenceGuard";
-import type { Analysis, FrictionMoment, GoalRelevance, RevisedAssignment, Step } from "@/lib/schema";
+import type { Analysis, FrictionMoment, GoalRelevance, RepairEffects, RevisedAssignment, Step } from "@/lib/schema";
 
 function ScreenHeading({
   eyebrow,
@@ -596,7 +596,29 @@ export interface RepairScreenProps {
   appliedRepairIds: string[];
   onApply: (stepId: string) => void;
   onKeep: (stepId: string) => void;
-  onCustomize: (stepId: string, suggestion: string) => void;
+  onCustomize: (stepId: string, suggestion: string) => Promise<void>;
+}
+
+function effectLabels(effects: RepairEffects): string[] {
+  const labels: string[] = [];
+  if (effects.keepsInfoVisible) labels.push("Keeps information visible");
+  if (effects.reducesWorkingMemory) labels.push("Lowers memory demand");
+  if (effects.reducesFineMotor) labels.push("Lowers motor precision");
+  if (effects.reducesReadingLoad) labels.push("Lowers reading load");
+  if (effects.addsNonColorCue) labels.push("Adds a non-color cue");
+  if (effects.addsCaptionOrTranscript) labels.push("Adds captions or transcript");
+  if (effects.addsResponseAlternative) labels.push("Adds response choices");
+  if (effects.replacementEnvironment) {
+    labels.push(`Moves step to ${effects.replacementEnvironment}`);
+  }
+  for (const change of effects.timeConstraintChanges) {
+    labels.push(
+      change.action === "remove"
+        ? `Removes timer ${change.constraintId}`
+        : `Sets timer ${change.constraintId} to ${change.limitMinutes} min`,
+    );
+  }
+  return labels.length > 0 ? labels : ["No deterministic measurement changes"];
 }
 
 export function RepairScreen({ steps, appliedRepairIds, onApply, onKeep, onCustomize }: RepairScreenProps) {
@@ -607,6 +629,8 @@ export function RepairScreen({ steps, appliedRepairIds, onApply, onKeep, onCusto
   );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   function choose(stepId: string, choice: "apply" | "keep") {
     setDecisions((current) => ({ ...current, [stepId]: choice }));
@@ -617,12 +641,28 @@ export function RepairScreen({ steps, appliedRepairIds, onApply, onKeep, onCusto
   function beginCustomize(step: Step) {
     setEditingId(step.id);
     setDraft(step.repair?.suggestion ?? "");
+    setCustomError(null);
   }
 
-  function saveCustomize(stepId: string) {
-    onCustomize(stepId, draft);
-    setDecisions((current) => ({ ...current, [stepId]: "custom" }));
-    setEditingId(null);
+  async function saveCustomize(stepId: string) {
+    const suggestion = draft.trim();
+    if (!suggestion) {
+      setCustomError("Write a complete repair before saving.");
+      return;
+    }
+    setSavingId(stepId);
+    setCustomError(null);
+    try {
+      await onCustomize(stepId, suggestion);
+      setDecisions((current) => ({ ...current, [stepId]: "custom" }));
+      setEditingId(null);
+    } catch (error) {
+      setCustomError(
+        error instanceof Error ? error.message : "Could not validate that repair. Try again.",
+      );
+    } finally {
+      setSavingId(null);
+    }
   }
 
   const reviewed = Object.keys(decisions).length;
@@ -649,11 +689,18 @@ export function RepairScreen({ steps, appliedRepairIds, onApply, onKeep, onCusto
                   <ArrowRight size={18} aria-hidden="true" />
                   <div><p>Recommended</p><span>{step.repair!.suggestion}</span></div>
                 </div>
+                <ul className="repair-effect-list" aria-label="Measured effects">
+                  {effectLabels(step.repair!.effects).map((effect) => <li key={effect}>{effect}</li>)}
+                </ul>
                 {editingId === step.id && (
                   <div className="customize-field">
                     <label htmlFor={`custom-${step.id}`}>Customize the recommendation</label>
                     <textarea id={`custom-${step.id}`} value={draft} onChange={(event) => setDraft(event.target.value)} autoFocus />
-                    <button type="button" className="button button--small button--primary" onClick={() => saveCustomize(step.id)}>Save &amp; apply</button>
+                    <p>The new wording will be reclassified before it can affect measurements.</p>
+                    {customError && <p role="alert" className="customize-error">{customError}</p>}
+                    <button type="button" className="button button--small button--primary" onClick={() => saveCustomize(step.id)} disabled={savingId === step.id || draft.trim().length === 0}>
+                      {savingId === step.id ? "Validating…" : "Save & apply"}
+                    </button>
                   </div>
                 )}
                 <div className="rigor-note">
@@ -727,10 +774,11 @@ export interface ConstraintTestProps {
   /** The same graph with accepted repairs applied, so results can be recomputed. */
   repairedAnalysis: Analysis;
   report: EngineReport;
+  repairedReport: EngineReport;
   condition: string;
 }
 
-export function ConstraintTest({ analysis, repairedAnalysis, report, condition }: ConstraintTestProps) {
+export function ConstraintTest({ analysis, repairedAnalysis, report, repairedReport, condition }: ConstraintTestProps) {
   const { goTo, selectCondition } = useWorkflow();
   const selected = CONDITIONS.find((item) => item.id === condition) ?? CONDITIONS[0];
   const unavailable = selected.unavailable === true;
@@ -749,6 +797,13 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, condition }
   });
   const fixedCount = failedSteps.length - stillFailing.length;
   const focusedStep = stillFailing[0] ?? failedSteps[0] ?? analysis.steps[0];
+  const focusedRepaired = focusedStep ? repairedById.get(focusedStep.id) : undefined;
+  const focusedFixed = Boolean(
+    focusedStep &&
+      selected.fails(focusedStep) &&
+      focusedRepaired &&
+      !selected.fails(focusedRepaired),
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -819,11 +874,11 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, condition }
               <p className="eyebrow">Why this fails</p>
               <h3>{focusedStep.action}</h3>
               <p>{focusedStep.relevanceReason}</p>
-              {focusedStep.repair && (
+              {focusedFixed && focusedStep.repair ? (
                 <span>
-                  <CheckCircle2 size={15} aria-hidden="true" /> Applying the suggested repair clears this step
+                  <CheckCircle2 size={15} aria-hidden="true" /> Your accepted repair clears this condition at this step
                 </span>
-              )}
+              ) : <span>No accepted repair changes this condition at this step.</span>}
             </article>
           )}
         </section>
@@ -831,12 +886,12 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, condition }
         <aside className="condition-preview" aria-labelledby="preview-title">
           <p className="eyebrow">Student preview</p>
           <h2 id="preview-title">{focusedStep.action}</h2>
-          {focusedStep.repair ? (
+          {focusedFixed && focusedStep.repair ? (
             <><div className="preview-results"><p>Your task support</p><strong>{focusedStep.repair.suggestion}</strong></div><p className="preview-assurance"><Check size={14} aria-hidden="true" /> Reference remains available while working.</p></>
           ) : (
             <p className="preview-empty">No change is suggested for this step under the selected condition.</p>
           )}
-          <dl className="compact-metrics"><div><dt>Task environments</dt><dd>{report.switching.uniqueEnvironments.length}</dd></div><div><dt>Time limit</dt><dd>{report.timing.timeLimitMinutes ?? "None"}{report.timing.timeLimitMinutes ? " min" : ""}</dd></div></dl>
+          <dl className="compact-metrics"><div><dt>Task environments</dt><dd>{report.switching.uniqueEnvironments.length}{repairedReport.switching.uniqueEnvironments.length !== report.switching.uniqueEnvironments.length ? ` → ${repairedReport.switching.uniqueEnvironments.length}` : ""}</dd></div><div><dt>Active timers</dt><dd>{report.timing.constraints.length || "None"}{repairedReport.timing.constraints.length !== report.timing.constraints.length ? ` → ${repairedReport.timing.constraints.length || "None"}` : ""}</dd></div></dl>
         </aside>
       </div>
       <div className="screen-footer-actions"><button type="button" className="button button--secondary" onClick={() => goTo("repair")}><ArrowLeft size={16} aria-hidden="true" /> Back to repairs</button><button type="button" className="button button--secondary" onClick={() => selectCondition(CONDITIONS[0].id)}>Run another test</button><ArrowButton onClick={() => goTo("preview")}>Continue</ArrowButton></div>
@@ -852,6 +907,7 @@ export interface StudentPreviewProps {
   /** Identifies the exact inputs this revision belongs to, so a rewrite left over
    *  from a different set of accepted repairs is never shown or exported. */
   revisionKey: string;
+  existingRevision: RevisedAssignment | null;
   onRevised: (revisionKey: string, revised: RevisedAssignment) => void;
 }
 
@@ -872,7 +928,7 @@ const ACCESS_TOOLS: AccessTool[] = [
   { id: "highlight", label: "Highlight current step", hint: "Dim everything else", live: false },
 ];
 
-export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText, revisionKey, onRevised }: StudentPreviewProps) {
+export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText, revisionKey, existingRevision, onRevised }: StudentPreviewProps) {
   const { goTo } = useWorkflow();
   const [tools, setTools] = useState<Record<string, boolean>>({ spacing: false, declutter: false, readAloud: false });
   // Held against the inputs it was generated from. Changing a repair decision
@@ -880,7 +936,8 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
   // repair list it no longer matches.
   const [result, setResult] = useState<{ key: string; value: RevisedAssignment } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
-  const revised = result?.key === revisionKey ? result.value : null;
+  const [retryNonce, setRetryNonce] = useState(0);
+  const revised = existingRevision ?? (result?.key === revisionKey ? result.value : null);
   const message = failure?.key === revisionKey ? failure.message : "";
 
   const accepted = useMemo(
@@ -896,7 +953,7 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
   );
 
   useEffect(() => {
-    if (accepted.length === 0) return;
+    if (accepted.length === 0 || revised !== null) return;
     let cancelled = false;
     generatePreview(assignmentText, objective, accepted)
       .then((value) => {
@@ -912,9 +969,14 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
         });
       });
     return () => { cancelled = true; };
-  }, [assignmentText, objective, accepted, revisionKey, onRevised]);
+  }, [assignmentText, objective, accepted, revisionKey, revised, onRevised, retryNonce]);
 
   const loading = accepted.length > 0 && revised === null && message === "";
+
+  function retryRewrite() {
+    setFailure(null);
+    setRetryNonce((value) => value + 1);
+  }
 
   // Read aloud uses the browser's own speech synthesis, so it works without a
   // network call and stops cleanly when switched off or when leaving the screen.
@@ -968,7 +1030,10 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
           )}
 
           {message !== "" && (
-            <p className="revision-empty revision-empty--error" role="alert">{message}</p>
+            <div className="revision-empty revision-empty--error" role="alert">
+              <p>{message}</p>
+              <button type="button" className="button button--small button--secondary" onClick={retryRewrite}>Retry rewrite</button>
+            </div>
           )}
 
           {revised && (
@@ -1023,11 +1088,13 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
       </div>
       <div className="screen-footer-actions">
         <button type="button" className="button button--secondary" onClick={() => goTo("repair")}><ArrowLeft size={16} aria-hidden="true" /> Back to repairs</button>
-        {/* Leaving mid-rewrite abandons the request, and the export would then
-            have nothing to carry, so the step is held open until it lands. */}
-        <ArrowButton onClick={() => goTo("complete")} disabled={loading}>
-          {loading ? "Waiting for the rewrite…" : "Finish analysis"}
-        </ArrowButton>
+        {message !== "" ? (
+          <button type="button" className="button button--secondary" onClick={() => goTo("complete")}>Finish analysis without revised assignment</button>
+        ) : (
+          <ArrowButton onClick={() => goTo("complete")} disabled={loading}>
+            {loading ? "Waiting for the rewrite…" : "Finish analysis"}
+          </ArrowButton>
+        )}
       </div>
     </main>
   );
@@ -1038,6 +1105,7 @@ export interface CompleteScreenProps {
   /** How many of those no longer appear once the accepted repairs are applied,
    *  recomputed from the repaired graph rather than assumed from the count. */
   frictionResolved: number;
+  frictionUnverified: number;
   repairsApplied: number;
   goalPreserved: boolean;
   onExport: () => void;
@@ -1046,21 +1114,26 @@ export interface CompleteScreenProps {
   scoreAfter: number;
 }
 
-export function CompleteScreen({ frictionCount, frictionResolved, repairsApplied, goalPreserved, onExport, canExport, scoreBefore, scoreAfter }: CompleteScreenProps) {
+export function CompleteScreen({ frictionCount, frictionResolved, frictionUnverified, repairsApplied, goalPreserved, onExport, canExport, scoreBefore, scoreAfter }: CompleteScreenProps) {
   const { startOver } = useWorkflow();
+  const unresolved = frictionCount - frictionResolved - frictionUnverified;
+  const remainingSummary = `${unresolved} friction ${unresolved === 1 ? "moment is" : "moments are"} still present${frictionUnverified > 0 ? `, and ${frictionUnverified} ${frictionUnverified === 1 ? "outcome could not be verified" : "outcomes could not be verified"} from the task data` : ""}.`;
   return (
     <main className="complete-screen">
       <div className="complete-mark" aria-hidden="true"><span /><span /><span /></div>
       <p className="eyebrow">Analysis complete</p>
-      <h1 data-screen-heading tabIndex={-1}>Your task is ready.</h1>
+      <h1 data-screen-heading tabIndex={-1}>{canExport ? "Your revised task is ready." : "Your analysis is complete."}</h1>
       <p className="complete-intro">
-        {frictionResolved === frictionCount
+        {!canExport
+          ? "The task was measured and your accepted repair decisions were recorded. No revised assignment was generated, so export is unavailable."
+          : frictionResolved === frictionCount
           ? "Every friction moment AccessLens detected is resolved in the revised task, and the learning goal is unchanged."
-          : `The repairs you accepted were applied and the task was measured again. ${frictionCount - frictionResolved} friction ${frictionCount - frictionResolved === 1 ? "moment is" : "moments are"} still present, because no accepted repair addresses ${frictionCount - frictionResolved === 1 ? "it" : "them"}.`}
+          : `The repairs you accepted were applied and the task was measured again. ${remainingSummary}`}
       </p>
       <div className="completion-facts">
         <p><CheckCircle2 size={18} aria-hidden="true" /><span>Learning goal {goalPreserved ? "preserved" : "needs review"}</span></p>
         <p><span>{frictionResolved}<em> / </em>{frictionCount}</span><small>friction moments resolved</small></p>
+        {frictionUnverified > 0 && <p><span>{frictionUnverified}</span><small>outcomes unverified</small></p>}
         <p><span>{repairsApplied}</span><small>repairs applied</small></p>
         {scoreAfter > scoreBefore && (
           <p className="complete-delta">
@@ -1076,7 +1149,7 @@ export function CompleteScreen({ frictionCount, frictionResolved, repairsApplied
         <button type="button" className="button button--secondary" onClick={startOver}>Start another analysis</button>
       </div>
       {!canExport && (
-        <p className="export-hint">Apply a repair and open the student preview to generate the revised assignment.</p>
+        <p className="export-hint">No revised assignment is available. Return to the student preview and retry the rewrite to enable export.</p>
       )}
       <p className="educator-note">AccessLens identifies potential task-level accessibility barriers. Educator judgment remains part of every decision.</p>
     </main>

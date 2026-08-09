@@ -2,12 +2,21 @@ import { NextResponse } from "next/server";
 
 import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
 import { LIGHT_LIMIT, checkRateLimit } from "@/lib/rateLimit";
-import { objectiveExtractionSchema } from "@/lib/schema";
+import { objectiveExtractionSchema, objectiveRequestSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  const body = await request.json().catch(() => null);
+  const parsed = objectiveRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Paste the full assignment text so there is something to analyse." },
+      { status: 400 }
+    );
+  }
+
   const rate = checkRateLimit(request, "objective", LIGHT_LIMIT);
   if (!rate.allowed) {
     return NextResponse.json(
@@ -16,19 +25,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let assignmentText: string;
-  try {
-    ({ assignmentText } = await request.json());
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  if (typeof assignmentText !== "string" || assignmentText.trim().length < 40) {
-    return NextResponse.json(
-      { error: "Paste the full assignment text so there is something to analyse." },
-      { status: 400 }
-    );
-  }
+  const { assignmentText } = parsed.data;
 
   try {
     const response = await getClient().messages.parse({

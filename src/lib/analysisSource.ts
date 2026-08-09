@@ -1,4 +1,4 @@
-import type { Analysis, ObjectiveCandidate, RevisedAssignment } from "./schema";
+import type { Analysis, ObjectiveCandidate, Repair, RevisedAssignment } from "./schema";
 import { SAMPLES } from "@/samples/biology";
 
 /**
@@ -15,6 +15,11 @@ function matchSample(text: string) {
 
 export class AnalysisUnavailableError extends Error {}
 
+export interface AnalysisResult {
+  analysis: Analysis;
+  warnings: string[];
+}
+
 export async function extractObjectives(text: string): Promise<ObjectiveCandidate[]> {
   const sample = matchSample(text);
   if (sample) return sample.objectives;
@@ -28,11 +33,25 @@ export async function extractObjectives(text: string): Promise<ObjectiveCandidat
 export async function analyzeAssignment(
   text: string,
   lockedObjective: string
-): Promise<Analysis> {
+): Promise<AnalysisResult> {
   const sample = matchSample(text);
-  if (sample) return sample.analysis;
+  if (sample) return { analysis: sample.analysis, warnings: [] };
 
-  return post<Analysis>("/api/analyze", { assignmentText: text, lockedObjective });
+  return post<AnalysisResult>("/api/analyze", { assignmentText: text, lockedObjective });
+}
+
+export async function classifyRepair(
+  lockedObjective: string,
+  analysis: Analysis,
+  stepId: string,
+  suggestion: string
+): Promise<Repair> {
+  return post<Repair>("/api/repair", {
+    lockedObjective,
+    analysis,
+    stepId,
+    suggestion,
+  });
 }
 
 export interface AcceptedRepair {

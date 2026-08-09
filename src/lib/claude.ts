@@ -76,7 +76,7 @@ The two sensory flags describe what the student must **receive**, never what the
 
 ## Duration
 
-When the assignment attaches a length to a single step — a twenty-minute video to watch, a three-minute answer to record, a fifty-minute lab period — put those minutes in that step's estimatedMinutes. This is separate from timeLimitMinutes, which is a deadline for the whole task. A step with no stated length leaves estimatedMinutes null; do not guess how long ordinary work takes.
+When the assignment attaches a length to a single step — a twenty-minute video to watch, a three-minute answer to record, a fifty-minute lab period — put those minutes in that step's estimatedMinutes. A timer or deadline belongs in timeConstraints, with every step completed while that particular clock runs. Multiple independent clocks must be separate constraints. A step with no stated length leaves estimatedMinutes null; do not guess how long ordinary work takes.
 
 ## Word counts
 
@@ -86,4 +86,4 @@ Estimate the words a student must read at each step, including linked readings t
 
 Where a demand is incidental, propose a repair phrased as revised instructions the educator could adopt, not as advice about accessibility. State plainly whether the locked objective is still assessed just as fully. Never propose removing something the objective requires.
 
-Every repair must also state, in \`effects\`, exactly which demands it moves. Set a flag only when your own suggestion delivers it. Keeping simulation results on screen sets keepsInfoVisible and reducesWorkingMemory — it does not remove a time limit, add captions, or change how the student responds, and claiming otherwise would tell the educator a barrier is fixed when nothing about it changed. A repair may legitimately set several flags when it genuinely does several things; the test is whether the educator, reading the suggestion alone, would agree each one follows from it.`;
+Every repair must also state, in \`effects\`, exactly which demands it moves. Set a flag only when your own suggestion delivers it. A timer change must name the exact timeConstraint id it changes. A tool-consolidation repair must name the replacementEnvironment. Keeping simulation results on screen sets keepsInfoVisible and reducesWorkingMemory — it does not remove a timer, add captions, or change how the student responds, and claiming otherwise would tell the educator a barrier is fixed when nothing about it changed. A repair may legitimately set several effects when it genuinely does several things; the test is whether the educator, reading the suggestion alone, would agree each one follows from it.`;

@@ -3,13 +3,23 @@ import { NextResponse } from "next/server";
 import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
 import { clampAnalysis } from "@/lib/engine";
 import { verifyEvidence } from "@/lib/evidenceGuard";
+import { normalizeAnalysisGraph } from "@/lib/graphNormalizer";
 import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
-import { analysisSchema } from "@/lib/schema";
+import { analysisRequestSchema, analysisSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  const body = await request.json().catch(() => null);
+  const parsed = analysisRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Paste the full assignment and lock a learning objective before analysing." },
+      { status: 400 }
+    );
+  }
+
   const rate = checkRateLimit(request, "analyze", ANALYSIS_LIMIT);
   if (!rate.allowed) {
     return NextResponse.json(
@@ -18,27 +28,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let assignmentText: string;
-  let lockedObjective: string;
-  try {
-    ({ assignmentText, lockedObjective } = await request.json());
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  if (typeof assignmentText !== "string" || assignmentText.trim().length < 40) {
-    return NextResponse.json(
-      { error: "Paste the full assignment text so there is something to analyse." },
-      { status: 400 }
-    );
-  }
-
-  if (typeof lockedObjective !== "string" || lockedObjective.trim().length === 0) {
-    return NextResponse.json(
-      { error: "Lock a learning objective before analysing." },
-      { status: 400 }
-    );
-  }
+  const { assignmentText, lockedObjective } = parsed.data;
 
   try {
     const response = await getClient().messages.parse({
@@ -63,7 +53,7 @@ ${lockedObjective}
 
 Decompose the assignment below into the sequence of actions a student performs, and judge every demand against that objective.
 
-Remember: evidence quotes must be copied character-for-character from the assignment; information dependencies (produces / consumes / producedInfoStaysVisible) drive the working-memory analysis; any time limit stated anywhere in the assignment belongs in timeLimitMinutes, while a duration attached to a single step belongs in that step's estimatedMinutes; and every repair must use its "effects" object to state exactly which demands it moves, setting only the flags its own suggestion delivers.
+Remember: evidence quotes must be copied character-for-character from the assignment; information dependencies drive the working-memory analysis; each independent timer belongs in timeConstraints with its exact step scope; a duration attached to one step belongs in estimatedMinutes; and every repair must state only the effects its own suggestion delivers.
 
 <assignment>
 ${assignmentText}
@@ -79,14 +69,21 @@ ${assignmentText}
       );
     }
 
-    const checked = verifyEvidence(clampAnalysis(response.parsed_output), assignmentText);
+    const normalized = normalizeAnalysisGraph(clampAnalysis(response.parsed_output));
+    const checked = verifyEvidence(normalized.analysis, assignmentText);
     if (checked.discarded > 0) {
       console.warn(
         `evidence guard discarded ${checked.discarded} unverifiable quote(s): ${checked.discardedStepIds.join(", ")}`
       );
     }
 
-    return NextResponse.json(checked.analysis);
+    const warnings = [...normalized.warnings];
+    if (checked.discarded > 0) {
+      warnings.push(
+        `${checked.discarded} evidence quote${checked.discarded === 1 ? " was" : "s were"} removed because the text could not be verified in the assignment.`
+      );
+    }
+    return NextResponse.json({ analysis: checked.analysis, warnings });
   } catch (error) {
     console.error("analysis failed", error);
     return NextResponse.json(

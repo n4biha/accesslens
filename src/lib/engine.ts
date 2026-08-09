@@ -70,27 +70,27 @@ export interface SwitchingReport {
 
 export type TimingVerdict = "untimed" | "comfortable" | "tight" | "infeasible";
 
+export interface TimeConstraintMeasurement {
+  id: string;
+  limitMinutes: number;
+  stepIds: string[];
+  requiredMinutesMean: number;
+  requiredMinutesConservative: number;
+  verdict: Exclude<TimingVerdict, "untimed">;
+  verdictConservative: Exclude<TimingVerdict, "untimed">;
+  utilizationMean: number;
+}
+
 export interface TimingReport {
-  timeLimitMinutes: number | null;
   totalWords: number;
   readingMinutesMean: number;
   readingMinutesConservative: number;
   actionMinutes: number;
   requiredMinutesMean: number;
   requiredMinutesConservative: number;
-  /**
-   * The part of the task the stated limit actually covers, and how long that
-   * part takes. A quiz timer does not run while the student watches a video
-   * assigned for the week before, so comparing the limit against the whole
-   * assignment would report an impossible deadline that does not exist.
-   */
-  limitedStepCount: number;
-  limitedMinutesMean: number;
-  limitedMinutesConservative: number;
+  constraints: TimeConstraintMeasurement[];
   verdict: TimingVerdict;
   verdictConservative: TimingVerdict;
-  /** Fraction of the limit consumed at the mean reading rate; null when untimed. */
-  utilizationMean: number | null;
 }
 
 export interface TextReport {
@@ -221,8 +221,10 @@ export function analyzeSwitching(steps: Step[]): SwitchingReport {
   };
 }
 
-function verdictFor(required: number, limit: number | null): TimingVerdict {
-  if (limit === null) return "untimed";
+function verdictFor(
+  required: number,
+  limit: number
+): Exclude<TimingVerdict, "untimed"> {
   const ratio = required / limit;
   if (ratio > 1) return "infeasible";
   if (ratio > 0.7) return "tight";
@@ -234,10 +236,9 @@ function stepSeconds(step: Step): number {
   // twenty-minute video is twenty minutes of the student's time, not the
   // thirty seconds a generic step is worth.
   const stated = step.estimatedMinutes;
-  let seconds =
-    stated !== null && stated > 0
-      ? Math.max(stated * 60, BASE_SECONDS_PER_STEP)
-      : BASE_SECONDS_PER_STEP;
+  if (stated !== null && stated > 0) return stated * 60;
+
+  let seconds = BASE_SECONDS_PER_STEP;
   if (step.demands.fineMotor >= 2) seconds += PRECISION_STEP_EXTRA_SECONDS;
   if (step.demands.communication !== "none") seconds += RESPONSE_STEP_EXTRA_SECONDS;
   return seconds;
@@ -251,7 +252,7 @@ function cost(steps: Step[]): { words: number; minutes: number } {
 }
 
 export function analyzeTiming(analysis: Analysis): TimingReport {
-  const { steps, timeLimitMinutes } = analysis;
+  const { steps } = analysis;
 
   const whole = cost(steps);
   const totalWords = whole.words;
@@ -261,28 +262,55 @@ export function analyzeTiming(analysis: Analysis): TimingReport {
   const requiredMinutesMean = readingMinutesMean + actionMinutes;
   const requiredMinutesConservative = readingMinutesConservative + actionMinutes;
 
-  // The limit is judged against the steps that are actually under it. When the
-  // graph marks no step as timed, the limit is taken to cover the whole task.
-  const timedSteps = steps.filter((step) => step.demands.timePressure >= 2);
-  const limited = cost(timedSteps.length > 0 ? timedSteps : steps);
-  const limitedMean = limited.words / MEAN_READING_WPM + limited.minutes;
-  const limitedConservative = limited.words / CONSERVATIVE_READING_WPM + limited.minutes;
+  const stepsById = new Map(steps.map((step) => [step.id, step]));
+  const constraints: TimeConstraintMeasurement[] = analysis.timeConstraints.map(
+    (constraint) => {
+      const scopedSteps = constraint.stepIds.flatMap((stepId) => {
+        const step = stepsById.get(stepId);
+        return step ? [step] : [];
+      });
+      const scoped = cost(scopedSteps);
+      const scopedMean = scoped.words / MEAN_READING_WPM + scoped.minutes;
+      const scopedConservative = scoped.words / CONSERVATIVE_READING_WPM + scoped.minutes;
+      return {
+        id: constraint.id,
+        limitMinutes: constraint.limitMinutes,
+        stepIds: constraint.stepIds,
+        requiredMinutesMean: round(scopedMean),
+        requiredMinutesConservative: round(scopedConservative),
+        verdict: verdictFor(scopedMean, constraint.limitMinutes),
+        verdictConservative: verdictFor(scopedConservative, constraint.limitMinutes),
+        utilizationMean: round(scopedMean / constraint.limitMinutes, 2),
+      };
+    }
+  );
+
+  const worst = (
+    field: "verdict" | "verdictConservative"
+  ): TimingVerdict => {
+    if (constraints.length === 0) return "untimed";
+    const rank: Record<Exclude<TimingVerdict, "untimed">, number> = {
+      comfortable: 0,
+      tight: 1,
+      infeasible: 2,
+    };
+    return constraints.reduce(
+      (current, constraint) =>
+        rank[constraint[field]] > rank[current] ? constraint[field] : current,
+      "comfortable" as Exclude<TimingVerdict, "untimed">
+    );
+  };
 
   return {
-    timeLimitMinutes,
     totalWords,
     readingMinutesMean: round(readingMinutesMean),
     readingMinutesConservative: round(readingMinutesConservative),
     actionMinutes: round(actionMinutes),
     requiredMinutesMean: round(requiredMinutesMean),
     requiredMinutesConservative: round(requiredMinutesConservative),
-    limitedStepCount: timedSteps.length > 0 ? timedSteps.length : steps.length,
-    limitedMinutesMean: round(limitedMean),
-    limitedMinutesConservative: round(limitedConservative),
-    verdict: verdictFor(limitedMean, timeLimitMinutes),
-    verdictConservative: verdictFor(limitedConservative, timeLimitMinutes),
-    utilizationMean:
-      timeLimitMinutes === null ? null : round(limitedMean / timeLimitMinutes, 2),
+    constraints,
+    verdict: worst("verdict"),
+    verdictConservative: worst("verdictConservative"),
   };
 }
 
@@ -351,7 +379,8 @@ export interface AccessibilityScore {
  */
 export function scoreAccessibility(
   report: EngineReport,
-  analysis: Analysis
+  analysis: Analysis,
+  resolvedFrictionIds: ReadonlySet<string> = new Set()
 ): AccessibilityScore {
   const breakdown: ScoreDeduction[] = [];
   const deduct = (label: string, points: number) => {
@@ -385,8 +414,11 @@ export function scoreAccessibility(
     deduct("A slower reader would run out of time", 5);
   }
 
-  const high = analysis.frictionMoments.filter((f) => f.severity === "high").length;
-  const medium = analysis.frictionMoments.filter((f) => f.severity === "medium").length;
+  const activeFriction = analysis.frictionMoments.filter(
+    (friction) => !resolvedFrictionIds.has(friction.id)
+  );
+  const high = activeFriction.filter((f) => f.severity === "high").length;
+  const medium = activeFriction.filter((f) => f.severity === "medium").length;
   deduct(`${high} high-severity friction moment${high === 1 ? "" : "s"}`, high * 4);
   deduct(`${medium} moderate friction moment${medium === 1 ? "" : "s"}`, medium * 2);
 
@@ -419,10 +451,11 @@ export function clampAnalysis(analysis: Analysis): Analysis {
 
   return {
     ...analysis,
-    timeLimitMinutes:
-      analysis.timeLimitMinutes !== null && analysis.timeLimitMinutes > 0
-        ? analysis.timeLimitMinutes
-        : null,
+    timeConstraints: analysis.timeConstraints.flatMap((constraint) =>
+      Number.isFinite(constraint.limitMinutes) && constraint.limitMinutes > 0
+        ? [{ ...constraint, limitMinutes: constraint.limitMinutes }]
+        : []
+    ),
     steps: analysis.steps.map((step) => ({
       ...step,
       estimatedMinutes:

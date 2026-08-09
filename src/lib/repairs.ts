@@ -1,211 +1,298 @@
-import type { Analysis, BarrierType, Demands, RepairEffects, Step } from "./schema";
+import { analyzeMemory, analyzeTiming } from "./engine";
+import type {
+  Analysis,
+  BarrierType,
+  Demands,
+  FrictionMoment,
+  RepairEffects,
+  Step,
+} from "./schema";
 
-/**
- * Applies accepted repairs to the task graph so the measurements move.
- *
- * Recording that a repair was accepted is not enough: the score, the constraint
- * tests and the journey all derive from step demands, so unless the demands
- * change the interface claims an improvement it never demonstrates. Each repair
- * moves only the demands it actually addresses — accepting a fix for values
- * that vanish must not quietly cancel an unrelated time limit on the same step,
- * because "PASS after repair" would then be describing something the educator
- * never agreed to. Nothing here touches goal relevance or academic content.
- */
+export type FrictionStatus = "resolved" | "unresolved" | "unverified";
 
-const NO_EFFECTS: RepairEffects = {
-  keepsInfoVisible: false,
-  reducesWorkingMemory: false,
-  reducesFineMotor: false,
-  removesTimePressure: false,
-  reducesReadingLoad: false,
-  addsNonColorCue: false,
-  addsCaptionOrTranscript: false,
-  addsResponseAlternative: false,
-};
+export interface FrictionResolution {
+  frictionId: string;
+  status: FrictionStatus;
+  reason: string;
+}
 
-/**
- * What each barrier category implies a repair changes, used when the model did
- * not state the effects itself. Derived from the friction moment that flagged
- * the step, so the inference is still grounded in a specific finding rather
- * than in the shape of the step.
- */
-const EFFECTS_BY_BARRIER: Record<BarrierType, Partial<RepairEffects>> = {
-  working_memory: { keepsInfoVisible: true, reducesWorkingMemory: true },
-  context_switching: { keepsInfoVisible: true, reducesWorkingMemory: true },
-  fine_motor: { reducesFineMotor: true },
-  time_pressure: { removesTimePressure: true },
-  reading_load: { reducesReadingLoad: true },
-  single_modality_communication: { addsResponseAlternative: true },
-  sensory_color_only: { addsNonColorCue: true },
-  sensory_audio_only: { addsCaptionOrTranscript: true },
-  // Nothing in the demand schema measures how findable the next action is, so
-  // there is no demand to move. The repair is still recorded; it just cannot
-  // claim a measured improvement.
-  navigation_ambiguity: {},
-};
-
-/** Last resort when a repaired step is not covered by any friction moment. */
-const EFFECTS_BY_KEYWORD: Array<[RegExp, Partial<RepairEffects>]> = [
-  [/memor|recall|hold in mind|remember/i, { keepsInfoVisible: true, reducesWorkingMemory: true }],
-  [/visib|on screen|record.*value|write.*down/i, { keepsInfoVisible: true }],
-  [/motor|drag|precision|pointer|dexterit/i, { reducesFineMotor: true }],
-  [/tim(e|ing)|clock|deadline|pressure|rush/i, { removesTimePressure: true }],
-  [/read|text|dens|wording|jargon/i, { reducesReadingLoad: true }],
-  [/colou?r/i, { addsNonColorCue: true }],
-  [/audio|caption|transcript|hearing|sound/i, { addsCaptionOrTranscript: true }],
-  [/spoken|speech|verbal|modalit|oral|present/i, { addsResponseAlternative: true }],
-];
-
-function effectsFor(step: Step, barrierTypes: readonly BarrierType[]): RepairEffects {
-  if (step.repair === null) return NO_EFFECTS;
-  if (step.repair.effects) return step.repair.effects;
-
-  const inferred: RepairEffects = { ...NO_EFFECTS };
-  let matched = false;
-
-  for (const barrier of barrierTypes) {
-    Object.assign(inferred, EFFECTS_BY_BARRIER[barrier]);
-    matched = true;
-  }
-
-  if (!matched) {
-    const text = `${step.repair.barrierReduced} ${step.repair.suggestion}`;
-    for (const [pattern, effects] of EFFECTS_BY_KEYWORD) {
-      if (pattern.test(text)) Object.assign(inferred, effects);
-    }
-  }
-
-  return inferred;
+export interface RepairApplication {
+  analysis: Analysis;
+  frictionResolutions: FrictionResolution[];
+  appliedRepairIds: string[];
 }
 
 function applyEffects(demands: Demands, effects: RepairEffects): Demands {
   const next: Demands = { ...demands, sensory: { ...demands.sensory } };
-
-  // Values kept visible no longer have to be held in mind.
   if (effects.reducesWorkingMemory && next.workingMemory >= 2) next.workingMemory = 1;
-
-  // An alternative to dragging still needs a pointer, just not a precise one.
   if (effects.reducesFineMotor && next.fineMotor >= 2) next.fineMotor = 1;
-
-  // Flexible timing removes the clock, not the work.
-  if (effects.removesTimePressure && next.timePressure >= 2) next.timePressure = 0;
-
-  // Chunked instructions leave the same content to read, but less at once.
   if (effects.reducesReadingLoad && next.readingLoad >= 2) next.readingLoad = 1;
-
-  // A label or pattern alongside the colour, captions alongside the audio.
   if (effects.addsNonColorCue) next.sensory.colorOnly = false;
   if (effects.addsCaptionOrTranscript) next.sensory.audioOnly = false;
-
-  // Offering written, recorded and live routes means speech is no longer the
-  // only way through. "typed" stands for the least restrictive accepted route,
-  // so a student who cannot speak is no longer blocked at this step.
-  if (
-    effects.addsResponseAlternative &&
-    (next.communication === "spoken" ||
-      next.communication === "handwritten" ||
-      next.communication === "video")
-  ) {
-    next.communication = "typed";
+  if (effects.addsResponseAlternative && next.communication !== "none") {
+    next.communication = "multiple";
   }
-
   return next;
 }
 
-/**
- * Whether a barrier category is still observable at a step. A friction moment
- * only clears once none of the steps it spans still shows its barrier, so
- * resolution is recomputed from the repaired demands rather than assumed from
- * the fact that a repair was accepted.
- */
-const STILL_PRESENT: Record<BarrierType, (step: Step) => boolean> = {
-  // Mirrors how the engine measures memory: what matters is information that
-  // has to survive unaided, not the step's own rating in isolation. A step that
-  // merely rates a 2 while holding and needing nothing is not where the barrier
-  // lives, and treating it as such would leave a resolved moment open forever.
-  working_memory: (step) =>
-    step.demands.workingMemory >= 3 ||
-    (step.demands.workingMemory >= 2 && step.consumes.length > 0) ||
-    (step.produces.length > 0 && !step.producedInfoStaysVisible),
-  context_switching: (step) =>
-    step.demands.contextSwitch &&
-    step.produces.length > 0 &&
-    !step.producedInfoStaysVisible,
-  fine_motor: (step) => step.demands.fineMotor >= 2,
-  time_pressure: (step) => step.demands.timePressure >= 2,
-  reading_load: (step) => step.demands.readingLoad >= 2,
-  single_modality_communication: (step) =>
-    step.demands.communication !== "none" && step.demands.communication !== "typed",
-  sensory_color_only: (step) => step.demands.sensory.colorOnly,
-  sensory_audio_only: (step) => step.demands.sensory.audioOnly,
-  // No demand describes navigation clarity, so this can never be shown resolved.
-  navigation_ambiguity: () => true,
-};
+function localBarrierPresent(barrier: BarrierType, steps: readonly Step[]): boolean {
+  switch (barrier) {
+    case "fine_motor":
+      return steps.some((step) => step.demands.fineMotor >= 2);
+    case "reading_load":
+      return steps.some((step) => step.demands.readingLoad >= 2);
+    case "single_modality_communication":
+      return steps.some(
+        (step) =>
+          step.demands.communication !== "none" &&
+          step.demands.communication !== "multiple"
+      );
+    case "sensory_color_only":
+      return steps.some((step) => step.demands.sensory.colorOnly);
+    case "sensory_audio_only":
+      return steps.some((step) => step.demands.sensory.audioOnly);
+    default:
+      return false;
+  }
+}
 
-export function applyRepairs(analysis: Analysis, appliedStepIds: readonly string[]): Analysis {
-  if (appliedStepIds.length === 0) return analysis;
-  const applied = new Set(appliedStepIds);
+function memoryPresent(analysis: Analysis, moment: FrictionMoment): boolean {
+  const ids = new Set(moment.stepIds);
+  const report = analyzeMemory(analysis.steps);
+  return (
+    report.carried.some(
+      (item) => ids.has(item.producedAtStepId) || ids.has(item.consumedAtStepId)
+    ) || report.overCapacityStepIds.some((stepId) => ids.has(stepId))
+  );
+}
 
-  // Which barriers were flagged at each step, so a repair without stated
-  // effects can be resolved against the finding that prompted it.
-  const barriersByStep = new Map<string, BarrierType[]>();
-  for (const moment of analysis.frictionMoments) {
-    for (const stepId of moment.stepIds) {
-      const list = barriersByStep.get(stepId) ?? [];
-      list.push(moment.barrierType);
-      barriersByStep.set(stepId, list);
+function contextTransitions(analysis: Analysis, moment: FrictionMoment): number {
+  const ids = new Set(moment.stepIds);
+  return analysis.steps.filter(
+    (step, index) => index > 0 && ids.has(step.id) && step.demands.contextSwitch
+  ).length;
+}
+
+function timingPresent(analysis: Analysis, moment: FrictionMoment): boolean {
+  const ids = new Set(moment.stepIds);
+  const report = analyzeTiming(analysis);
+  const constrained = report.constraints.some(
+    (constraint) =>
+      constraint.stepIds.some((stepId) => ids.has(stepId)) &&
+      constraint.verdict !== "comfortable"
+  );
+  return (
+    constrained ||
+    analysis.steps.some(
+      (step) => ids.has(step.id) && step.demands.timePressure >= 2
+    )
+  );
+}
+
+function barrierPresent(analysis: Analysis, moment: FrictionMoment): boolean | null {
+  const ids = new Set(moment.stepIds);
+  const steps = analysis.steps.filter((step) => ids.has(step.id));
+  switch (moment.barrierType) {
+    case "working_memory":
+      return memoryPresent(analysis, moment);
+    case "context_switching":
+      return contextTransitions(analysis, moment) > 0;
+    case "time_pressure":
+      return timingPresent(analysis, moment);
+    case "navigation_ambiguity":
+      return null;
+    default:
+      return localBarrierPresent(moment.barrierType, steps);
+  }
+}
+
+function relevantEffect(
+  source: Analysis,
+  repaired: Analysis,
+  moment: FrictionMoment,
+  effectsByStep: ReadonlyMap<string, RepairEffects>
+): boolean {
+  const ids = new Set(moment.stepIds);
+  const referenced = [...effectsByStep].filter(([stepId]) => ids.has(stepId));
+  switch (moment.barrierType) {
+    case "working_memory":
+      return referenced.some(
+        ([, effects]) => effects.keepsInfoVisible || effects.reducesWorkingMemory
+      );
+    case "context_switching":
+      return (
+        [...effectsByStep.values()].some(
+          (effects) => effects.replacementEnvironment !== null
+        ) && contextTransitions(repaired, moment) < contextTransitions(source, moment)
+      );
+    case "fine_motor":
+      return referenced.some(([, effects]) => effects.reducesFineMotor);
+    case "reading_load":
+      return referenced.some(([, effects]) => effects.reducesReadingLoad);
+    case "single_modality_communication":
+      return referenced.some(([, effects]) => effects.addsResponseAlternative);
+    case "sensory_color_only":
+      return referenced.some(([, effects]) => effects.addsNonColorCue);
+    case "sensory_audio_only":
+      return referenced.some(([, effects]) => effects.addsCaptionOrTranscript);
+    case "navigation_ambiguity":
+      return referenced.length > 0;
+    case "time_pressure": {
+      const relevantConstraintIds = new Set(
+        source.timeConstraints
+          .filter((constraint) => constraint.stepIds.some((stepId) => ids.has(stepId)))
+          .map((constraint) => constraint.id)
+      );
+      return [...effectsByStep.values()].some((effects) =>
+        effects.timeConstraintChanges.some((change) =>
+          relevantConstraintIds.has(change.constraintId)
+        )
+      );
     }
   }
+}
 
+function resolutionFor(
+  source: Analysis,
+  repaired: Analysis,
+  moment: FrictionMoment,
+  effectsByStep: ReadonlyMap<string, RepairEffects>
+): FrictionResolution {
+  const changed = relevantEffect(source, repaired, moment, effectsByStep);
+  if (!changed) {
+    return {
+      frictionId: moment.id,
+      status: "unresolved",
+      reason: "No accepted repair changed the measurement behind this finding.",
+    };
+  }
+
+  const before = barrierPresent(source, moment);
+  const after = barrierPresent(repaired, moment);
+  if (before === null || after === null) {
+    return {
+      frictionId: moment.id,
+      status: "unverified",
+      reason: "The repair was applied, but this barrier is not represented by a measurable demand.",
+    };
+  }
+  if (!before) {
+    return {
+      frictionId: moment.id,
+      status: "unverified",
+      reason: "The original task graph did not contain the measured condition claimed by this finding.",
+    };
+  }
+  if (after) {
+    return {
+      frictionId: moment.id,
+      status: "unresolved",
+      reason: "The measured condition is still present after the accepted repair.",
+    };
+  }
+  return {
+    frictionId: moment.id,
+    status: "resolved",
+    reason: "The measured condition was present before and is absent after the repair.",
+  };
+}
+
+/** Applies only the effects stated by accepted repairs and verifies outcomes. */
+export function applyRepairs(
+  source: Analysis,
+  appliedStepIds: readonly string[]
+): RepairApplication {
+  const requested = new Set(appliedStepIds);
   const effectsByStep = new Map<string, RepairEffects>();
+  const appliedRepairIds: string[] = [];
 
-  const steps: Step[] = analysis.steps.map((step) => {
-    if (!applied.has(step.id) || step.repair === null) return step;
-
-    const effects = effectsFor(step, barriersByStep.get(step.id) ?? []);
+  let steps = source.steps.map((step) => {
+    if (!requested.has(step.id) || step.repair === null) return step;
+    const effects = step.repair.effects;
     effectsByStep.set(step.id, effects);
-
+    appliedRepairIds.push(step.id);
     return {
       ...step,
-      producedInfoStaysVisible: effects.keepsInfoVisible ? true : step.producedInfoStaysVisible,
+      environment: effects.replacementEnvironment ?? step.environment,
+      producedInfoStaysVisible: effects.keepsInfoVisible
+        ? true
+        : step.producedInfoStaysVisible,
       demands: applyEffects(step.demands, effects),
-      // Cleared in this measurement view only. The score penalises a step that
-      // carries an *outstanding* repair, so leaving it set would keep charging
-      // for a barrier the educator has already fixed and make a fully repaired
-      // task unable to score clean. The original steps keep their repair text
-      // for the repair plan and student preview.
       repair: null,
     };
   });
 
-  const repairedById = new Map(steps.map((step) => [step.id, step]));
+  const changes = [...effectsByStep.values()].flatMap(
+    (effects) => effects.timeConstraintChanges
+  );
+  const removedConstraintIds = new Set(
+    changes.filter((change) => change.action === "remove").map((change) => change.constraintId)
+  );
+  const replacementLimits = new Map(
+    changes.flatMap((change) =>
+      change.action === "set_limit" &&
+      change.limitMinutes !== null &&
+      change.limitMinutes > 0
+        ? [[change.constraintId, change.limitMinutes] as const]
+        : []
+    )
+  );
+  const timeConstraints = source.timeConstraints.flatMap((constraint) => {
+    if (removedConstraintIds.has(constraint.id)) return [];
+    const limitMinutes = replacementLimits.get(constraint.id);
+    return [{ ...constraint, limitMinutes: limitMinutes ?? constraint.limitMinutes }];
+  });
 
-  // A friction moment survives while any step it spans still shows its barrier
-  // in the repaired graph. Dropping the resolved ones matters because the score
-  // deducts per moment: without this, repairing every barrier would still be
-  // charged for all of them.
-  const frictionMoments = analysis.frictionMoments.filter((moment) =>
-    moment.stepIds.some((stepId) => {
-      const step = repairedById.get(stepId);
-      return step === undefined || STILL_PRESENT[moment.barrierType](step);
-    })
+  const removedStepIds = new Set(
+    source.timeConstraints
+      .filter((constraint) => removedConstraintIds.has(constraint.id))
+      .flatMap((constraint) => constraint.stepIds)
+  );
+  const stillConstrainedStepIds = new Set(
+    timeConstraints.flatMap((constraint) => constraint.stepIds)
+  );
+  const relaxedConstraintIds = new Set(
+    analyzeTiming({ ...source, steps, timeConstraints }).constraints
+      .filter(
+        (constraint) =>
+          replacementLimits.has(constraint.id) &&
+          constraint.verdictConservative === "comfortable"
+      )
+      .map((constraint) => constraint.id)
+  );
+  const relaxedStepIds = new Set(
+    timeConstraints
+      .filter((constraint) => relaxedConstraintIds.has(constraint.id))
+      .flatMap((constraint) => constraint.stepIds)
+  );
+  const pressuredByAnotherConstraint = new Set(
+    timeConstraints
+      .filter((constraint) => !relaxedConstraintIds.has(constraint.id))
+      .flatMap((constraint) => constraint.stepIds)
+  );
+  steps = steps.map((step, index) => ({
+    ...step,
+    demands: {
+      ...step.demands,
+      timePressure:
+        (removedStepIds.has(step.id) && !stillConstrainedStepIds.has(step.id))
+          ? 0
+          : relaxedStepIds.has(step.id) &&
+              !pressuredByAnotherConstraint.has(step.id) &&
+              step.demands.timePressure >= 2
+            ? 1
+            : step.demands.timePressure,
+      contextSwitch:
+        index > 0 && step.environment.trim() !== steps[index - 1].environment.trim(),
+    },
+  }));
+
+  const analysis: Analysis = { ...source, steps, timeConstraints };
+  const frictionResolutions = source.frictionMoments.map((moment) =>
+    resolutionFor(source, analysis, moment, effectsByStep)
   );
 
-  // The stated limit only disappears once every step it pressed has been
-  // repaired *by a repair that actually addresses timing*; repairing one timed
-  // step out of three does not make the assignment untimed.
-  const stillTimed = analysis.steps.some(
-    (step) =>
-      step.demands.timePressure >= 2 &&
-      !(applied.has(step.id) && step.repair !== null && effectsByStep.get(step.id)?.removesTimePressure)
-  );
-
-  return {
-    ...analysis,
-    timeLimitMinutes: stillTimed ? analysis.timeLimitMinutes : null,
-    frictionMoments,
-    steps,
-  };
+  return { analysis, frictionResolutions, appliedRepairIds };
 }
 
 /** Steps that carry a repair the educator has not yet decided on. */

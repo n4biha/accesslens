@@ -2,18 +2,21 @@ import { NextResponse } from "next/server";
 
 import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
 import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
-import { revisedAssignmentSchema } from "@/lib/schema";
+import { previewRequestSchema, revisedAssignmentSchema } from "@/lib/schema";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 export const maxDuration = 60;
 
-interface AcceptedRepair {
-  action: string;
-  suggestion: string;
-  rigorNote: string;
-}
-
 export async function POST(request: Request) {
+  const body = await request.json().catch(() => null);
+  const parsed = previewRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Provide the assignment, objective, and at least one complete repair." },
+      { status: 400 }
+    );
+  }
+
   const rate = checkRateLimit(request, "preview", ANALYSIS_LIMIT);
   if (!rate.allowed) {
     return NextResponse.json(
@@ -22,25 +25,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let assignmentText: string;
-  let lockedObjective: string;
-  let repairs: AcceptedRepair[];
-  try {
-    ({ assignmentText, lockedObjective, repairs } = await request.json());
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  if (typeof assignmentText !== "string" || assignmentText.trim().length < 40) {
-    return NextResponse.json({ error: "Nothing to rewrite." }, { status: 400 });
-  }
-
-  if (!Array.isArray(repairs) || repairs.length === 0) {
-    return NextResponse.json(
-      { error: "Apply at least one repair before generating the revised assignment." },
-      { status: 400 }
-    );
-  }
+  const { assignmentText, lockedObjective, repairs } = parsed.data;
 
   const repairList = repairs
     .map(

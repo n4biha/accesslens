@@ -5,11 +5,12 @@ const NO_EFFECT: RepairEffects = {
   keepsInfoVisible: false,
   reducesWorkingMemory: false,
   reducesFineMotor: false,
-  removesTimePressure: false,
+  timeConstraintChanges: [],
   reducesReadingLoad: false,
   addsNonColorCue: false,
   addsCaptionOrTranscript: false,
   addsResponseAlternative: false,
+  replacementEnvironment: null,
 };
 
 export interface Sample {
@@ -281,8 +282,8 @@ const steps: Step[] = [
       communication: "typed",
       wordCount: 220,
     },
-    // The twelve minutes is a deadline for the whole quiz, carried in
-    // timeLimitMinutes; recording it here as well would double-count it.
+    // The twelve minutes is a deadline for the quiz, carried in the quiz timer;
+    // recording it here as well would double-count it.
     estimatedMinutes: null,
     evidence: "Answer questions 1 through 5 within twelve minutes.",
     goalRelevance: "essential",
@@ -290,8 +291,13 @@ const steps: Step[] = [
       "The questions themselves assess the locked objective, though the time limit is a separate demand.",
     repair: {
       suggestion:
-        "Remove the twelve-minute limit, or extend it, unless completing the reasoning quickly is itself being assessed.",
-      effects: { ...NO_EFFECT, removesTimePressure: true },
+        "Remove the twelve-minute quiz limit.",
+      effects: {
+        ...NO_EFFECT,
+        timeConstraintChanges: [
+          { constraintId: "quiz-timer", action: "remove", limitMinutes: null },
+        ],
+      },
       barrierReduced: "Processing-speed pressure",
       rigorPreserved: true,
       rigorNote:
@@ -373,7 +379,15 @@ export const BIOLOGY_SAMPLE: Sample = {
     },
   ],
   analysis: {
-    timeLimitMinutes: 12,
+    timeConstraints: [
+      {
+        id: "quiz-timer",
+        limitMinutes: 12,
+        stepIds: ["s8", "s9"],
+        evidence:
+          "Answer questions 1 through 5 within twelve minutes. The timer starts when you open the quiz and does not pause.",
+      },
+    ],
     steps,
     frictionMoments: [
       {

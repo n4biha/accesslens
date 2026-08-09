@@ -904,3 +904,10 @@ button.progress-link:hover .progress-number { border-color: var(--rose-deep); co
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
+
+.repair-effect-list { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0 0; padding: 0; list-style: none; }
+.repair-effect-list li { padding: .28rem .52rem; border: 1px solid rgba(82,127,94,.28); border-radius: 999px; background: rgba(82,127,94,.09); color: var(--green); font-size: .62rem; font-weight: 700; }
+.customize-field > p { margin: 0; color: var(--muted); font-size: .65rem; }
+.customize-field .customize-error { color: var(--rose-deep); }
+.workflow-warning { max-width: 1100px; margin: 1rem auto 0; padding: .8rem 1rem; border: 1px solid rgba(154,103,31,.3); border-radius: 9px; background: rgba(255,244,204,.55); color: var(--ink); font-size: .72rem; }
+.workflow-warning ul { margin: .45rem 0 0; padding-left: 1.2rem; }

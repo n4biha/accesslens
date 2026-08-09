@@ -1,4 +1,5 @@
 import type { EngineReport } from "./engine";
+import type { FrictionResolution } from "./repairs";
 import type { Analysis, RevisedAssignment } from "./schema";
 
 export interface SummaryMeasurements {
@@ -12,6 +13,7 @@ export interface SummaryMeasurements {
   repairedAnalysis: Analysis;
   repairedReport: EngineReport;
   scoreAfter: number;
+  frictionResolutions: FrictionResolution[];
 }
 
 /**
@@ -24,7 +26,7 @@ export function buildSummary(
   objective: string,
   measurements: SummaryMeasurements
 ): string {
-  const { analysis, report, scoreBefore, repairedAnalysis, repairedReport, scoreAfter } =
+  const { analysis, report, scoreBefore, repairedReport, scoreAfter, frictionResolutions } =
     measurements;
   const lines: string[] = [];
 
@@ -49,9 +51,11 @@ export function buildSummary(
   const decayCount = (source: EngineReport) =>
     source.memory.carried.filter((item) => item.decayRisk).length;
   const timing = (source: EngineReport) =>
-    source.timing.timeLimitMinutes === null
+    source.timing.constraints.length === 0
       ? "no limit imposed"
-      : `the ${source.timing.limitedStepCount} step(s) under the clock take about ${source.timing.limitedMinutesMean} minutes against a ${source.timing.timeLimitMinutes}-minute limit (${source.timing.verdict}); a slower reader needs about ${source.timing.limitedMinutesConservative} minutes. The whole task takes about ${source.timing.requiredMinutesMean} minutes`;
+      : `${source.timing.constraints.map((constraint) => `${constraint.id}: ${constraint.stepIds.length} step(s) take about ${constraint.requiredMinutesMean} minutes against ${constraint.limitMinutes} minutes (${constraint.verdict})`).join("; ")}. The whole task takes about ${source.timing.requiredMinutesMean} minutes`;
+  const resolutionCount = (status: FrictionResolution["status"]) =>
+    frictionResolutions.filter((resolution) => resolution.status === status).length;
 
   const rows: Array<[string, string, string]> = [
     ["Task accessibility confidence", `${scoreBefore}/100`, `${scoreAfter}/100`],
@@ -74,7 +78,7 @@ export function buildSummary(
     [
       "Friction moments",
       `${analysis.frictionMoments.length}`,
-      `${repairedAnalysis.frictionMoments.length}`,
+      `${resolutionCount("resolved")} resolved, ${resolutionCount("unresolved")} unresolved, ${resolutionCount("unverified")} unverified`,
     ],
   ];
 

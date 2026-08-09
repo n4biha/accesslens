@@ -28,6 +28,7 @@ import { shortCitation } from "@/lib/standards";
 import {
   AnalysisUnavailableError,
   analyzeAssignment,
+  classifyRepair,
   extractObjectives,
 } from "@/lib/analysisSource";
 import { buildSummary, downloadSummary, summaryFilename } from "@/lib/exportSummary";
@@ -76,6 +77,7 @@ export default function Home() {
   const [revised, setRevised] = useState<{ key: string; value: RevisedAssignment } | null>(null);
   const [visited, setVisited] = useState<ReadonlySet<WorkflowStage>>(new Set(["analyze"]));
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>("objective");
+  const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([]);
 
   // Identifies the request currently in flight. A response that arrives after
   // the educator has started another analysis is discarded rather than allowed
@@ -92,17 +94,27 @@ export default function Home() {
   // The same graph with accepted repairs applied. Everything downstream — the
   // score, the constraint tests — recomputes from this, so an applied repair
   // visibly removes the barrier instead of only being recorded.
-  const repairedAnalysis = useMemo(
+  const repairApplication = useMemo(
     () => applyRepairs(analysis, appliedRepairIds),
     [analysis, appliedRepairIds],
+  );
+  const repairedAnalysis = repairApplication.analysis;
+  const resolvedFrictionIds = useMemo(
+    () =>
+      new Set(
+        repairApplication.frictionResolutions
+          .filter((resolution) => resolution.status === "resolved")
+          .map((resolution) => resolution.frictionId),
+      ),
+    [repairApplication.frictionResolutions],
   );
   const repairedReport = useMemo(
     () => runEngine(repairedAnalysis, analyzedText),
     [repairedAnalysis, analyzedText],
   );
   const repairedConfidence = useMemo(
-    () => scoreAccessibility(repairedReport, repairedAnalysis),
-    [repairedReport, repairedAnalysis],
+    () => scoreAccessibility(repairedReport, repairedAnalysis, resolvedFrictionIds),
+    [repairedReport, repairedAnalysis, resolvedFrictionIds],
   );
 
   const selectedStep = useMemo(() => {
@@ -110,15 +122,23 @@ export default function Home() {
     const matched = selectedFriction.stepIds
       .map((stepId) => steps.find((step) => step.id === stepId))
       .filter((step): step is Step => Boolean(step));
-    return matched.find((step) => step.repair !== null) ?? matched[0] ?? steps[0] ?? null;
+    return matched.find((step) => step.repair !== null) ?? matched[0] ?? null;
   }, [selectedFriction, steps]);
 
   // The revision is only valid for the inputs it was generated from. Keying it
   // this way means changing a repair decision retires the old rewrite instead
   // of leaving it to be exported beside a repair count it no longer matches.
   const revisionKey = useMemo(
-    () => JSON.stringify([analyzedText, objective, [...appliedRepairIds].sort()]),
-    [analyzedText, objective, appliedRepairIds],
+    () =>
+      JSON.stringify([
+        analyzedText,
+        objective,
+        steps
+          .filter((step) => appliedRepairIds.includes(step.id) && step.repair !== null)
+          .map((step) => ({ id: step.id, action: step.action, repair: step.repair }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
+      ]),
+    [analyzedText, objective, appliedRepairIds, steps],
   );
   const currentRevision = revised?.key === revisionKey ? revised.value : null;
 
@@ -139,12 +159,11 @@ export default function Home() {
     setAppliedRepairIds((current) => current.filter((id) => id !== stepId));
   }
 
-  function customizeRepair(stepId: string, suggestion: string) {
-    setSteps((current) => current.map((step) =>
-      step.id === stepId && step.repair
-        ? { ...step, repair: { ...step.repair, suggestion } }
-        : step,
-    ));
+  async function customizeRepair(stepId: string, suggestion: string) {
+    const repair = await classifyRepair(objective, analysis, stepId, suggestion);
+    setSteps((current) =>
+      current.map((step) => (step.id === stepId ? { ...step, repair } : step)),
+    );
     addRepair(stepId);
   }
 
@@ -160,6 +179,11 @@ export default function Home() {
     }
   }, []);
 
+  const navigateFromNav = useCallback((next: WorkflowStage) => {
+    if (stage === "loading") requestId.current++;
+    goToStage(next);
+  }, [goToStage, stage]);
+
   /** Reads the assignment and proposes a learning objective for the educator to lock. */
   async function submitAssignment() {
     const text = assignmentDraft;
@@ -168,6 +192,7 @@ export default function Home() {
     setAppliedRepairIds([]);
     setRevised(null);
     setCondition("working_memory");
+    setAnalysisWarnings([]);
     // A new assignment invalidates every result downstream, so the stages that
     // showed them stop being reachable until this analysis produces its own.
     setVisited(new Set(["analyze"]));
@@ -204,9 +229,10 @@ export default function Home() {
         new Promise((resolve) => setTimeout(resolve, MIN_LOADING_MS)),
       ]);
       if (token !== requestId.current) return;
-      setBaseAnalysis(result);
-      setSteps(result.steps);
-      setSelectedFriction(result.frictionMoments[0] ?? null);
+      setBaseAnalysis(result.analysis);
+      setSteps(result.analysis.steps);
+      setAnalysisWarnings(result.warnings);
+      setSelectedFriction(result.analysis.frictionMoments[0] ?? null);
       goToStage("journey");
     } catch (err) {
       if (token !== requestId.current) return;
@@ -228,6 +254,7 @@ export default function Home() {
         repairedAnalysis,
         repairedReport,
         scoreAfter: repairedConfidence.score,
+        frictionResolutions: repairApplication.frictionResolutions,
       })
     );
   }
@@ -245,6 +272,7 @@ export default function Home() {
     setError(null);
     setRevised(null);
     setVisited(new Set(["analyze"]));
+    setAnalysisWarnings([]);
     goToStage("analyze");
   }, [goToStage]);
 
@@ -268,13 +296,19 @@ export default function Home() {
   return (
     <WorkflowProvider value={workflowActions}>
       <div className="app-shell">
-        <AppNav stage={stage} visited={visited} onNavigate={goToStage} />
+        <AppNav stage={stage} visited={visited} onNavigate={navigateFromNav} />
         <p className="sr-only" aria-live="polite">{STATUS_LABEL[stage]}</p>
 
         {error && (
           <p role="alert" className="workflow-error">
             {error}
           </p>
+        )}
+        {analysisWarnings.length > 0 && (
+          <aside className="workflow-warning" aria-label="Analysis quality warnings">
+            <strong>Some model relationships were repaired before measurement.</strong>
+            <ul>{analysisWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+          </aside>
         )}
 
         <div className="screen-enter" key={stage}>
@@ -308,7 +342,7 @@ export default function Home() {
                   <div className="journey-clear">
                     <p>
                       <CheckCircle2 size={17} aria-hidden="true" />
-                      No friction moments found. Every step&rsquo;s demands trace back to the locked objective.
+                      No friction moments were identified. The score breakdown may still show independently measured demands.
                     </p>
                     <button
                       type="button"
@@ -336,6 +370,7 @@ export default function Home() {
               analysis={analysis}
               repairedAnalysis={repairedAnalysis}
               report={report}
+              repairedReport={repairedReport}
               condition={condition}
             />}
           {stage === "preview" && (
@@ -345,6 +380,7 @@ export default function Home() {
               appliedRepairIds={appliedRepairIds}
               assignmentText={analyzedText}
               revisionKey={revisionKey}
+              existingRevision={currentRevision}
               onRevised={recordRevision}
             />
           )}
@@ -352,8 +388,13 @@ export default function Home() {
             <CompleteScreen
               frictionCount={analysis.frictionMoments.length}
               frictionResolved={
-                analysis.frictionMoments.length - repairedAnalysis.frictionMoments.length
+                repairApplication.frictionResolutions.filter(
+                  (resolution) => resolution.status === "resolved",
+                ).length
               }
+              frictionUnverified={repairApplication.frictionResolutions.filter(
+                (resolution) => resolution.status === "unverified",
+              ).length}
               repairsApplied={appliedRepairIds.length}
               goalPreserved={goalPreserved}
               scoreBefore={confidence.score}

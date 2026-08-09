@@ -13,7 +13,7 @@ const PROGRESS = [
   { number: 4, label: "Friction", target: "barrier", stages: ["barrier"] },
   { number: 5, label: "Repair", target: "repair", stages: ["repair"] },
   { number: 6, label: "Test", target: "constraint", stages: ["constraint"] },
-  { number: 7, label: "Preview", target: "preview", stages: ["preview", "complete"] },
+  { number: 7, label: "Preview", target: "preview", stages: ["preview"] },
 ] as const;
 
 function LogoMark({ small = false }: { small?: boolean }) {
@@ -35,9 +35,14 @@ interface AppNavProps {
 }
 
 export default function AppNav({ stage, visited, onNavigate }: AppNavProps) {
-  const activeIndex = PROGRESS.findIndex((item) =>
-    (item.stages as readonly WorkflowStage[]).includes(stage),
-  );
+  // Completion is the state after the seven-step workflow, not another name
+  // for Preview. Advancing the index past the final item marks every step as
+  // complete without incorrectly exposing any of them as aria-current.
+  const activeIndex = stage === "complete"
+    ? PROGRESS.length
+    : PROGRESS.findIndex((item) =>
+        (item.stages as readonly WorkflowStage[]).includes(stage),
+      );
 
   return (
     <header className="app-nav">

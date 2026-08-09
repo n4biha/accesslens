@@ -16,11 +16,13 @@ export interface EvidenceCheck {
   verified: number;
   discarded: number;
   discardedStepIds: string[];
+  discardedConstraintIds: string[];
 }
 
 export function verifyEvidence(analysis: Analysis, assignmentText: string): EvidenceCheck {
   const haystack = normalize(assignmentText);
   const discardedStepIds: string[] = [];
+  const discardedConstraintIds: string[] = [];
   let verified = 0;
 
   const steps = analysis.steps.map((step) => {
@@ -33,11 +35,22 @@ export function verifyEvidence(analysis: Analysis, assignmentText: string): Evid
     return { ...step, evidence: "" };
   });
 
+  const timeConstraints = analysis.timeConstraints.map((constraint) => {
+    const needle = normalize(constraint.evidence);
+    if (needle.length > 0 && haystack.includes(needle)) {
+      verified++;
+      return constraint;
+    }
+    discardedConstraintIds.push(constraint.id);
+    return { ...constraint, evidence: "" };
+  });
+
   return {
-    analysis: { ...analysis, steps },
+    analysis: { ...analysis, steps, timeConstraints },
     verified,
-    discarded: discardedStepIds.length,
+    discarded: discardedStepIds.length + discardedConstraintIds.length,
     discardedStepIds,
+    discardedConstraintIds,
   };
 }
 

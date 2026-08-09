@@ -17,6 +17,7 @@ export const COMMUNICATION_MODES = [
   "spoken",
   "handwritten",
   "video",
+  "multiple",
 ] as const;
 
 export const barrierTypeSchema = z.enum([
@@ -108,9 +109,24 @@ export const repairEffectsSchema = z.object({
     .describe(
       "True when the change offers a route that needs less pointer precision, such as a typed entry instead of a drag."
     ),
-  removesTimePressure: z
-    .boolean()
-    .describe("True when the change removes or relaxes a clock running on this step."),
+  timeConstraintChanges: z
+    .array(
+      z.object({
+        constraintId: z
+          .string()
+          .describe("The id of the stated timer or deadline this change modifies."),
+        action: z.enum(["remove", "set_limit"]),
+        limitMinutes: z
+          .number()
+          .nullable()
+          .describe(
+            "The replacement limit for set_limit, or null when the constraint is removed."
+          ),
+      })
+    )
+    .describe(
+      "Explicit changes to stated timers. Empty when the repair does not change a timer."
+    ),
   reducesReadingLoad: z
     .boolean()
     .describe(
@@ -131,6 +147,12 @@ export const repairEffectsSchema = z.object({
     .describe(
       "True when the change lets the student respond in a different modality, so a single forced response mode is no longer the only route."
     ),
+  replacementEnvironment: z
+    .string()
+    .nullable()
+    .describe(
+      "The environment this step moves into when a repair consolidates tools or locations, otherwise null."
+    ),
 });
 
 export const repairSchema = z.object({
@@ -139,11 +161,9 @@ export const repairSchema = z.object({
     .describe(
       "A concrete change the educator could make to this step, phrased as revised instructions rather than advice."
     ),
-  effects: repairEffectsSchema
-    .nullable()
-    .describe(
-      "Exactly which demands this change moves. Set only the flags the suggestion genuinely delivers: a repair that keeps results on screen does not also remove a time limit. Null only when the change fits none of these flags."
-    ),
+  effects: repairEffectsSchema.describe(
+    "Exactly which demands this change moves. Set only effects the suggestion genuinely delivers; use false, empty arrays, and null when it moves no measured demand."
+  ),
   barrierReduced: z
     .string()
     .describe("The functional demand this change removes or lowers."),
@@ -234,12 +254,26 @@ export const frictionMomentSchema = z.object({
     ),
 });
 
-export const analysisSchema = z.object({
-  timeLimitMinutes: z
+export const timeConstraintSchema = z.object({
+  id: z.string().describe("Stable identifier for this timer, e.g. 'timer-1'."),
+  limitMinutes: z
     .number()
-    .nullable()
+    .describe("How many minutes the student has while this timer is active."),
+  stepIds: z
+    .array(z.string())
+    .describe("The ids of every step completed while this timer is running."),
+  evidence: z
+    .string()
     .describe(
-      "A deadline the student must finish work within, in minutes — for example a quiz timer or a session that closes. Null when no such limit exists. This is NOT the length of an artefact the student produces: a three-minute recording, a four-minute presentation, or a twenty-minute video to watch are durations, not limits, and must leave this null."
+      "The sentence or clause stating the limit, copied verbatim from the assignment."
+    ),
+});
+
+export const analysisSchema = z.object({
+  timeConstraints: z
+    .array(timeConstraintSchema)
+    .describe(
+      "Every independent timer or deadline, with the exact steps completed while it runs. Empty when the assignment is untimed. Artefact lengths and video durations belong on the step instead."
     ),
   steps: z.array(stepSchema).min(1).describe(
     "The complete sequence of actions a student performs, in order, from opening the assignment to submitting it. Never empty: every assignment has at least one step."
@@ -296,6 +330,31 @@ export const revisedAssignmentSchema = z.object({
     .describe("One entry per accepted repair, in the order they appear in the assignment."),
 });
 
+export const objectiveRequestSchema = z.object({
+  assignmentText: z.string().trim().min(40),
+});
+
+export const analysisRequestSchema = objectiveRequestSchema.extend({
+  lockedObjective: z.string().trim().min(1),
+});
+
+export const acceptedRepairSchema = z.object({
+  action: z.string().trim().min(1),
+  suggestion: z.string().trim().min(1),
+  rigorNote: z.string().trim().min(1),
+});
+
+export const previewRequestSchema = analysisRequestSchema.extend({
+  repairs: z.array(acceptedRepairSchema).min(1),
+});
+
+export const repairClassificationRequestSchema = z.object({
+  lockedObjective: z.string().trim().min(1),
+  analysis: analysisSchema,
+  stepId: z.string().trim().min(1),
+  suggestion: z.string().trim().min(1),
+});
+
 export type RevisedAssignment = z.infer<typeof revisedAssignmentSchema>;
 
 export type Demands = z.infer<typeof demandsSchema>;
@@ -303,6 +362,7 @@ export type Repair = z.infer<typeof repairSchema>;
 export type RepairEffects = z.infer<typeof repairEffectsSchema>;
 export type Step = z.infer<typeof stepSchema>;
 export type FrictionMoment = z.infer<typeof frictionMomentSchema>;
+export type TimeConstraint = z.infer<typeof timeConstraintSchema>;
 export type Analysis = z.infer<typeof analysisSchema>;
 export type BarrierType = z.infer<typeof barrierTypeSchema>;
 export type GoalRelevance = z.infer<typeof goalRelevanceSchema>;

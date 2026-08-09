@@ -83,7 +83,7 @@ const steps: Step[] = [
 ];
 
 const analysis: Analysis = {
-  timeLimitMinutes: 5,
+  timeConstraints: [{ id: "clock", limitMinutes: 5, stepIds: steps.map((s) => s.id), evidence: "" }],
   steps,
   frictionMoments: [],
 };
@@ -143,13 +143,13 @@ test("timer feasibility: mean reader is tight where a slower reader runs out", (
   assert.equal(timing.requiredMinutesConservative, 5.2);
   assert.equal(timing.verdict, "tight");
   assert.equal(timing.verdictConservative, "infeasible");
-  assert.equal(timing.utilizationMean, 0.93);
+  assert.equal(timing.constraints[0].utilizationMean, 0.93);
 });
 
 test("an untimed assignment is never judged infeasible", () => {
-  const timing = analyzeTiming({ ...analysis, timeLimitMinutes: null });
+  const timing = analyzeTiming({ ...analysis, timeConstraints: [] });
   assert.equal(timing.verdict, "untimed");
-  assert.equal(timing.utilizationMean, null);
+  assert.deepEqual(timing.constraints, []);
 });
 
 test("instruction density finds the densest paragraph", () => {
@@ -188,7 +188,7 @@ test("confidence score deducts only from measured friction", () => {
 
 test("a task with no measured friction scores 100", () => {
   const clean: Analysis = {
-    timeLimitMinutes: null,
+    timeConstraints: [],
     frictionMoments: [],
     steps: [step({ id: "a", environment: "Canvas" })],
   };
@@ -216,7 +216,7 @@ test("score never falls below zero", () => {
 
 test("a stated step duration is counted as the time it takes", () => {
   const withVideo: Analysis = {
-    timeLimitMinutes: 30,
+    timeConstraints: [{ id: "clock", limitMinutes: 30, stepIds: ["a", "b"], evidence: "" }],
     frictionMoments: [],
     steps: [
       step({ id: "a", environment: "Canvas" }),
@@ -236,18 +236,29 @@ test("a stated step duration is counted as the time it takes", () => {
   assert.equal(withoutDuration.actionMinutes, 1);
 });
 
-test("a stated duration shorter than a generic step does not shrink it", () => {
+test("a stated duration replaces generic action bonuses", () => {
   const brief: Analysis = {
-    timeLimitMinutes: null,
+    timeConstraints: [],
     frictionMoments: [],
     steps: [step({ id: "a", environment: "Canvas", estimatedMinutes: 0.1 })],
   };
-  assert.equal(analyzeTiming(brief).actionMinutes, 0.5);
+  assert.equal(analyzeTiming(brief).actionMinutes, 0.1);
+
+  const spoken = {
+    ...brief,
+    steps: [step({
+      id: "recording",
+      environment: "Recorder",
+      estimatedMinutes: 2,
+      demands: { communication: "spoken", fineMotor: 3 } as Step["demands"],
+    })],
+  };
+  assert.equal(analyzeTiming(spoken).actionMinutes, 2);
 });
 
 test("demand levels outside the documented range are clamped, not rejected", () => {
   const wild: Analysis = {
-    timeLimitMinutes: -4,
+    timeConstraints: [{ id: "bad", limitMinutes: -4, stepIds: ["a"], evidence: "" }],
     frictionMoments: [],
     steps: [
       step({
@@ -268,13 +279,13 @@ test("demand levels outside the documented range are clamped, not rejected", () 
     ],
   };
 
-  const { steps, timeLimitMinutes } = clampAnalysis(wild);
+  const { steps, timeConstraints } = clampAnalysis(wild);
   assert.equal(steps[0].demands.workingMemory, 3);
   assert.equal(steps[0].demands.fineMotor, 0);
   assert.equal(steps[0].demands.timePressure, 2);
   assert.equal(steps[0].demands.wordCount, 0);
   assert.equal(steps[0].estimatedMinutes, null);
-  assert.equal(timeLimitMinutes, null);
+  assert.deepEqual(timeConstraints, []);
 
   // The step itself survives: one bad integer must not cost the whole analysis.
   assert.equal(steps.length, 1);
@@ -287,7 +298,7 @@ test("a limit is judged against the steps it actually covers", () => {
   // a deadline that is impossible only because two unrelated things were added
   // together.
   const preLabVideo: Analysis = {
-    timeLimitMinutes: 15,
+    timeConstraints: [{ id: "quiz-clock", limitMinutes: 15, stepIds: ["quiz"], evidence: "" }],
     frictionMoments: [],
     steps: [
       step({ id: "video", environment: "Canvas", estimatedMinutes: 12 }),
@@ -300,19 +311,27 @@ test("a limit is judged against the steps it actually covers", () => {
   };
 
   const timing = analyzeTiming(preLabVideo);
-  assert.equal(timing.limitedStepCount, 1);
+  assert.equal(timing.constraints[0].stepIds.length, 1);
   assert.equal(timing.requiredMinutesMean, 14.6, "the whole task still counts the video");
-  assert.equal(timing.limitedMinutesMean, 2.6, "the limit is judged on the quiz alone");
+  assert.equal(timing.constraints[0].requiredMinutesMean, 2.6, "the limit is judged on the quiz alone");
   assert.equal(timing.verdict, "comfortable");
 });
 
-test("a limit with no step marked as timed still covers the whole task", () => {
-  const untargeted: Analysis = {
-    timeLimitMinutes: 1,
+test("multiple timers are judged independently and the worst verdict wins", () => {
+  const independentlyTimed: Analysis = {
+    timeConstraints: [
+      { id: "short", limitMinutes: 1, stepIds: ["a"], evidence: "" },
+      { id: "comfortable", limitMinutes: 10, stepIds: ["b"], evidence: "" },
+    ],
     frictionMoments: [],
-    steps: [step({ id: "a", environment: "Canvas", estimatedMinutes: 20 })],
+    steps: [
+      step({ id: "a", environment: "Canvas", estimatedMinutes: 2 }),
+      step({ id: "b", environment: "Canvas", estimatedMinutes: 2 }),
+    ],
   };
-  const timing = analyzeTiming(untargeted);
-  assert.equal(timing.limitedStepCount, 1);
+  const timing = analyzeTiming(independentlyTimed);
+  assert.equal(timing.constraints.length, 2);
+  assert.equal(timing.constraints[0].verdict, "infeasible");
+  assert.equal(timing.constraints[1].verdict, "comfortable");
   assert.equal(timing.verdict, "infeasible");
 });
