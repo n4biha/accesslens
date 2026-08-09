@@ -81,6 +81,7 @@ export default function Home() {
   }, [selectedFriction, steps]);
 
   useEffect(() => {
+    if (stage === "intro") return;
     const timer = window.setTimeout(() => {
       document.querySelector<HTMLElement>("[data-screen-heading]")?.focus({ preventScroll: true });
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -219,7 +220,14 @@ export default function Home() {
           )}
           {stage === "repair" && <RepairScreen steps={steps} onApply={addRepair} onKeep={keepCurrent} onCustomize={customizeRepair} />}
           {stage === "constraint" && <ConstraintTest key={condition} analysis={analysis} report={report} condition={condition} />}
-          {stage === "preview" && <StudentPreview objective={objective} steps={steps} appliedRepairIds={appliedRepairIds} />}
+          {stage === "preview" && (
+            <StudentPreview
+              objective={objective}
+              steps={steps}
+              appliedRepairIds={appliedRepairIds}
+              assignmentText={analyzedText}
+            />
+          )}
           {stage === "complete" && (
             <CompleteScreen
               frictionCount={analysis.frictionMoments.length}

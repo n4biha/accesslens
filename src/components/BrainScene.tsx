@@ -146,12 +146,18 @@ function BrainModel({
     // Meshopt quantization stores the anatomical dimensions on the glTF node.
     // Keep that transform separate: baking it into normalized integer vertices
     // would clamp the model back to a two-unit cube.
+    const geometry = (source.geometry as BufferGeometry).clone();
+    geometry.computeVertexNormals();
+    geometry.normalizeNormals();
+    geometry.computeBoundingSphere();
+
     return {
-      geometry: source.geometry as BufferGeometry,
+      geometry,
       matrix: source.matrixWorld.clone() as Matrix4,
     };
   }, [scene]);
 
+  useEffect(() => () => brainMesh.geometry.dispose(), [brainMesh]);
   useEffect(onReady, [onReady]);
 
   useFrame((state, delta) => {
@@ -162,7 +168,7 @@ function BrainModel({
   });
 
   return (
-    <group ref={rig} position={[0, 0.12, 0]}>
+    <group ref={rig} position={[0, 0.14, 0]}>
       <group scale={0.018} rotation={[-Math.PI / 2, 0, -0.12]}>
         <mesh
           geometry={brainMesh.geometry}
@@ -172,21 +178,21 @@ function BrainModel({
           receiveShadow
         >
           <meshPhysicalMaterial
-            color="#e2aaa6"
-            roughness={0.2}
+            color="#d2aaa8"
+            roughness={0.12}
             metalness={0}
-            transmission={0.19}
-            thickness={0.76}
-            ior={1.44}
+            transmission={0.045}
+            thickness={0.42}
+            ior={1.42}
             clearcoat={1}
-            clearcoatRoughness={0.09}
-            specularIntensity={0.9}
-            specularColor="#fff1eb"
-            sheen={0.5}
-            sheenRoughness={0.36}
-            sheenColor="#fbc5c1"
-            attenuationColor="#c4777a"
-            attenuationDistance={2.35}
+            clearcoatRoughness={0.022}
+            specularIntensity={1}
+            specularColor="#fffaf5"
+            sheen={0.12}
+            sheenRoughness={0.32}
+            sheenColor="#e8bbb8"
+            attenuationColor="#7d4554"
+            attenuationDistance={5}
           />
         </mesh>
       </group>
@@ -197,6 +203,7 @@ function BrainModel({
 
 function Scene({
   controlsRef,
+  interactive,
   reducedMotion,
   interacting,
   onReady,
@@ -204,6 +211,7 @@ function Scene({
   onInteractionEnd,
 }: {
   controlsRef: React.RefObject<OrbitControlsImpl | null>;
+  interactive: boolean;
   reducedMotion: boolean;
   interacting: boolean;
   onReady: () => void;
@@ -212,35 +220,36 @@ function Scene({
 }) {
   return (
     <>
-      <ambientLight intensity={0.84} />
-      <hemisphereLight args={["#fffaf5", "#c68a89", 1.26]} />
-      <directionalLight position={[-4.5, 5, 4]} intensity={3.2} color="#fff2e9" />
-      <directionalLight position={[4, 2, -3]} intensity={2.2} color="#e78491" />
-      <pointLight position={[-2.8, 0.5, 3.8]} intensity={7} color="#ffe1d8" />
+      <ambientLight intensity={0.27} />
+      <hemisphereLight args={["#fff8f1", "#57293a", 0.56]} />
+      <directionalLight position={[-4.8, 5.8, 4.8]} intensity={4.25} color="#fff7f1" />
+      <directionalLight position={[4.8, 2.6, -4]} intensity={1.9} color="#bd6078" />
+      <pointLight position={[-2.8, 0.8, 4.4]} intensity={5.2} color="#ffece4" />
+      <pointLight position={[2.8, -0.3, 3]} intensity={1.55} color="#c35d74" />
 
-      <Environment resolution={128} frames={1} environmentIntensity={0.66}>
+      <Environment resolution={128} frames={1} environmentIntensity={0.78}>
         <Lightformer
           form="rect"
-          intensity={2.2}
+          intensity={3.65}
           color="#fff7f0"
-          position={[-3, 3, 4]}
-          scale={[4.5, 2.2]}
+          position={[-3.2, 3.6, 4.5]}
+          scale={[5.5, 1.35]}
           target={[0, 0, 0]}
         />
         <Lightformer
           form="rect"
-          intensity={1.4}
-          color="#f4a9b2"
+          intensity={1.35}
+          color="#d98393"
           position={[4, 1, -3]}
           scale={[3, 4]}
           target={[0, 0, 0]}
         />
         <Lightformer
-          form="ring"
-          intensity={1.15}
+          form="rect"
+          intensity={1.65}
           color="#ffe4dc"
-          position={[0, -2, 2]}
-          scale={2.5}
+          position={[0, -2.2, 3.4]}
+          scale={[3.8, 1.2]}
           target={[0, 0, 0]}
         />
       </Environment>
@@ -257,15 +266,21 @@ function Scene({
 
       <mesh position={[0, -1.34, 0]} receiveShadow>
         <cylinderGeometry args={[1.58, 1.68, 0.18, 72]} />
-        <meshPhysicalMaterial color="#f5e2dc" roughness={0.7} clearcoat={0.24} />
+        <meshPhysicalMaterial color="#24171d" roughness={0.5} clearcoat={0.46} clearcoatRoughness={0.28} />
       </mesh>
       <mesh position={[0, -1.225, 0]} receiveShadow>
         <cylinderGeometry args={[1.36, 1.42, 0.08, 72]} />
-        <meshPhysicalMaterial color="#fff4ef" roughness={0.34} clearcoat={0.66} clearcoatRoughness={0.2} />
+        <meshPhysicalMaterial
+          color="#3a242c"
+          roughness={0.27}
+          transmission={0.08}
+          clearcoat={0.78}
+          clearcoatRoughness={0.16}
+        />
       </mesh>
       <mesh position={[0, -1.176, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[1.18, 0.017, 12, 96]} />
-        <meshStandardMaterial color="#df8c91" roughness={0.32} emissive="#b94f60" emissiveIntensity={0.08} />
+        <meshStandardMaterial color="#ee8197" roughness={0.28} emissive="#c9325c" emissiveIntensity={0.34} />
       </mesh>
       <ContactShadows
         position={[0, -1.22, 0]}
@@ -275,21 +290,22 @@ function Scene({
         far={3.2}
         resolution={256}
         frames={1}
-        color="#916c68"
+        color="#090509"
       />
 
       <OrbitControls
         ref={controlsRef}
-        target={[0, 0.05, 0]}
+        enabled={interactive}
+        target={[0, 0.08, 0]}
         enableZoom={false}
         enablePan={false}
         enableDamping
-        dampingFactor={0.07}
-        rotateSpeed={0.54}
+        dampingFactor={0.055}
+        rotateSpeed={0.46}
         minPolarAngle={MIN_POLAR_ANGLE}
         maxPolarAngle={MAX_POLAR_ANGLE}
-        autoRotate={!reducedMotion && !interacting}
-        autoRotateSpeed={0.24}
+        autoRotate={interactive && !reducedMotion && !interacting}
+        autoRotateSpeed={0.17}
         onStart={onInteractionStart}
         onEnd={onInteractionEnd}
       />
@@ -299,14 +315,23 @@ function Scene({
 
 useGLTF.preload(MODEL_PATH, false, true);
 
-export default function BrainScene() {
+export default function BrainScene({
+  interactive,
+  onReady,
+}: {
+  interactive: boolean;
+  onReady: () => void;
+}) {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const resumeTimer = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [interacting, setInteracting] = useState(false);
   const [webglAvailable] = useState(supportsWebGL);
   const reducedMotion = useReducedMotion();
-  const handleModelReady = useCallback(() => setReady(true), []);
+  const handleModelReady = useCallback(() => {
+    setReady(true);
+    onReady();
+  }, [onReady]);
 
   const pauseIdleRotation = useCallback(() => {
     if (resumeTimer.current) window.clearTimeout(resumeTimer.current);
@@ -326,6 +351,7 @@ export default function BrainScene() {
   );
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!interactive) return;
     const controls = controlsRef.current;
     if (!controls) return;
 
@@ -363,10 +389,11 @@ export default function BrainScene() {
 
   return (
     <div
-      className={`brain-canvas-frame ${ready ? "is-ready" : ""}`}
-      role="group"
-      aria-label="Interactive 3D anatomical brain. Drag or swipe to rotate. Use the arrow keys to rotate and R to reset."
-      tabIndex={0}
+      className={`brain-canvas-frame ${ready ? "is-ready" : ""} ${interactive ? "is-interactive" : ""}`}
+      role={interactive ? "group" : undefined}
+      aria-label={interactive ? "Interactive 3D anatomical brain. Drag or swipe to rotate. Use the arrow keys to rotate and R to reset." : undefined}
+      aria-hidden={!interactive}
+      tabIndex={interactive ? 0 : -1}
       onKeyDown={handleKeyDown}
     >
       <div className="brain-static-fallback" aria-hidden="true" />
@@ -374,14 +401,19 @@ export default function BrainScene() {
       {webglAvailable ? (
         <SceneErrorBoundary>
           <Canvas
-            camera={{ position: [0, 0.18, 5.1], fov: 38 }}
-            dpr={[1, 1.35]}
+            camera={{ position: [0, 0.18, 5.2], fov: 37 }}
+            dpr={[1.25, 2]}
+            frameloop={interactive && !reducedMotion ? "always" : "demand"}
             gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
+            onCreated={({ gl }) => {
+              gl.toneMappingExposure = 1.08;
+            }}
           >
             <Scene
               controlsRef={controlsRef}
+              interactive={interactive}
               reducedMotion={reducedMotion}
-              interacting={interacting}
+              interacting={!interactive || interacting}
               onReady={handleModelReady}
               onInteractionStart={pauseIdleRotation}
               onInteractionEnd={resumeIdleRotationLater}
@@ -389,9 +421,11 @@ export default function BrainScene() {
           </Canvas>
         </SceneErrorBoundary>
       ) : null}
-      <span className="brain-control-hint" aria-hidden="true">
-        Drag to rotate · Arrow keys · R to reset
-      </span>
+      {interactive && (
+        <span className="brain-control-hint" aria-hidden="true">
+          Drag to rotate · Arrow keys · R to reset
+        </span>
+      )}
     </div>
   );
 }

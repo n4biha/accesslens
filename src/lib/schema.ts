@@ -212,6 +212,33 @@ export const objectiveExtractionSchema = z.object({
     .describe("Candidate objectives, most likely first, at most three."),
 });
 
+export const revisedAssignmentSchema = z.object({
+  title: z
+    .string()
+    .describe("The assignment's own title, carried over unchanged."),
+  revisedText: z
+    .string()
+    .describe(
+      "The complete rewritten assignment as a student will read it: every instruction, in order, in the educator's voice. Plain text with blank lines between paragraphs and numbered steps where the original had them."
+    ),
+  changes: z
+    .array(
+      z.object({
+        what: z
+          .string()
+          .describe("One short sentence naming what changed in the instructions."),
+        why: z
+          .string()
+          .describe(
+            "One short sentence naming the barrier this removes, and confirming the academic demand it leaves intact."
+          ),
+      })
+    )
+    .describe("One entry per accepted repair, in the order they appear in the assignment."),
+});
+
+export type RevisedAssignment = z.infer<typeof revisedAssignmentSchema>;
+
 export type Demands = z.infer<typeof demandsSchema>;
 export type Repair = z.infer<typeof repairSchema>;
 export type Step = z.infer<typeof stepSchema>;

@@ -26,8 +26,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import DemandChips, { chipsForDemands } from "@/components/DemandChips";
 import { useWorkflow, type ConditionId } from "@/components/WorkflowContext";
+import { generatePreview } from "@/lib/analysisSource";
 import type { EngineReport } from "@/lib/engine";
-import type { Analysis, FrictionMoment, GoalRelevance, Step } from "@/lib/schema";
+import type { Analysis, FrictionMoment, GoalRelevance, RevisedAssignment, Step } from "@/lib/schema";
 
 function ScreenHeading({
   eyebrow,
@@ -93,7 +94,7 @@ export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) 
             aria-describedby="prototype-note"
           />
           <div className="document-footer">
-            <p id="prototype-note">Prototype preview · downstream findings use the biology demo</p>
+            <p id="prototype-note">Analysed live · the sample assignment answers instantly</p>
             <ArrowButton onClick={onSubmit} disabled={text.trim().length === 0}>Analyze task</ArrowButton>
           </div>
         </section>
@@ -516,36 +517,104 @@ export function ConstraintTest({ analysis, report, condition }: ConstraintTestPr
   );
 }
 
-export interface StudentPreviewProps { objective: string; steps: Step[]; appliedRepairIds: string[] }
+export interface StudentPreviewProps {
+  objective: string;
+  steps: Step[];
+  appliedRepairIds: string[];
+  assignmentText: string;
+}
 
 const ACCESS_TOOLS = ["Chunk instructions", "Keep references visible", "Reduce visual clutter", "Read aloud", "Increase spacing", "Highlight current step"];
 
-export function StudentPreview({ objective, steps, appliedRepairIds }: StudentPreviewProps) {
+export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText }: StudentPreviewProps) {
   const { goTo } = useWorkflow();
   const [tools, setTools] = useState<Record<string, boolean>>({ "Keep references visible": true, "Highlight current step": true });
-  const responseChoiceAvailable = steps.some((step) => appliedRepairIds.includes(step.id) && step.demands.communication !== "none" && step.goalRelevance !== "essential");
+  const [revised, setRevised] = useState<RevisedAssignment | null>(null);
+  const [message, setMessage] = useState("");
+
+  const accepted = useMemo(
+    () =>
+      steps
+        .filter((step) => appliedRepairIds.includes(step.id) && step.repair)
+        .map((step) => ({
+          action: step.action,
+          suggestion: step.repair!.suggestion,
+          rigorNote: step.repair!.rigorNote,
+        })),
+    [steps, appliedRepairIds],
+  );
+
+  useEffect(() => {
+    if (accepted.length === 0) return;
+    let cancelled = false;
+    generatePreview(assignmentText, objective, accepted)
+      .then((result) => { if (!cancelled) setRevised(result); })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setMessage(error instanceof Error ? error.message : "Could not rewrite the assignment.");
+      });
+    return () => { cancelled = true; };
+  }, [assignmentText, objective, accepted]);
+
+  const loading = accepted.length > 0 && revised === null && message === "";
+
   return (
     <main className="workflow-main student-preview-screen">
       <ScreenHeading eyebrow="Preview" title="Student Preview" subtitle="A calmer path through the same academic work." />
-      <div className="student-layout">
+
+      <section className="revision-compare" aria-label="Original and revised assignment">
         <article className="student-assignment">
-          <header><p>Biology 101</p><span>Diffusion &amp; Osmosis Lab</span></header>
+          <header><p>Original</p><span>As students receive it today</span></header>
           <section className="student-goal"><p className="eyebrow">Your goal</p><h2>{objective}</h2></section>
-          <ol>
-            {steps.map((step, index) => {
-              const applied = appliedRepairIds.includes(step.id) && step.repair;
-              return (
-                <li key={step.id} className={index === 0 ? "is-current" : ""}>
-                  <span>Step {index + 1}</span><h3>{step.action}</h3>
-                  {applied && <p className="student-support"><Sparkles size={15} aria-hidden="true" /> {step.repair!.suggestion}</p>}
-                </li>
-              );
-            })}
-          </ol>
-          {responseChoiceAvailable && (
-            <section className="response-options"><p className="eyebrow">Choose how to respond</p><div><button type="button">Write</button><button type="button">Record</button><button type="button">Present</button><button type="button">Visual explanation</button></div></section>
+          <pre className="assignment-body">{assignmentText}</pre>
+        </article>
+
+        <article className="student-assignment student-assignment--revised">
+          <header>
+            <p>Revised</p>
+            <span>{revised ? revised.title : "With the repairs you accepted"}</span>
+          </header>
+          <section className="student-goal"><p className="eyebrow">Your goal</p><h2>{objective}</h2></section>
+
+          {accepted.length === 0 && (
+            <p className="revision-empty">
+              No repairs accepted yet. Go back to the repair plan and apply one, and the
+              rewritten assignment appears here.
+            </p>
+          )}
+
+          {loading && (
+            <p className="revision-empty" aria-live="polite">
+              <Sparkles size={15} aria-hidden="true" /> Rewriting the assignment with your{" "}
+              {accepted.length} accepted {accepted.length === 1 ? "repair" : "repairs"}…
+            </p>
+          )}
+
+          {message !== "" && (
+            <p className="revision-empty revision-empty--error" role="alert">{message}</p>
+          )}
+
+          {revised && (
+            <pre className="assignment-body">{revised.revisedText}</pre>
           )}
         </article>
+      </section>
+
+      {revised && revised.changes.length > 0 && (
+        <section className="revision-changes" aria-labelledby="changes-title">
+          <h2 id="changes-title">What changed, and why</h2>
+          <ol>
+            {revised.changes.map((change) => (
+              <li key={change.what}>
+                <p><Check size={15} aria-hidden="true" /> {change.what}</p>
+                <span>{change.why}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      <div className="student-layout">
         <aside className="access-tools" aria-labelledby="tools-title">
           <h2 id="tools-title">Access tools</h2>
           <p>Personalize how the assignment is presented.</p>

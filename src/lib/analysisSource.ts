@@ -1,4 +1,4 @@
-import type { Analysis, ObjectiveCandidate } from "./schema";
+import type { Analysis, ObjectiveCandidate, RevisedAssignment } from "./schema";
 import { SAMPLES } from "@/samples/biology";
 
 /**
@@ -19,20 +19,10 @@ export async function extractObjectives(text: string): Promise<ObjectiveCandidat
   const sample = matchSample(text);
   if (sample) return sample.objectives;
 
-  const response = await fetch("/api/objective", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ assignmentText: text }),
-  }).catch(() => null);
-
-  if (!response || !response.ok) {
-    throw new AnalysisUnavailableError(
-      "Live analysis is not connected yet. Load one of the sample assignments to explore the full flow."
-    );
-  }
-
-  const data = await response.json();
-  return data.objectives as ObjectiveCandidate[];
+  const data = await post<{ objectives: ObjectiveCandidate[] }>("/api/objective", {
+    assignmentText: text,
+  });
+  return data.objectives;
 }
 
 export async function analyzeAssignment(
@@ -42,17 +32,55 @@ export async function analyzeAssignment(
   const sample = matchSample(text);
   if (sample) return sample.analysis;
 
-  const response = await fetch("/api/analyze", {
+  return post<Analysis>("/api/analyze", { assignmentText: text, lockedObjective });
+}
+
+export interface AcceptedRepair {
+  action: string;
+  suggestion: string;
+  rigorNote: string;
+}
+
+/**
+ * Rewrites the assignment with only the accepted repairs applied. Unlike the
+ * other two calls this has no sample shortcut: the revision depends on which
+ * repairs the educator actually accepted, so a cached answer would be a
+ * fabrication rather than a shortcut.
+ */
+export async function generatePreview(
+  assignmentText: string,
+  lockedObjective: string,
+  repairs: AcceptedRepair[]
+): Promise<RevisedAssignment> {
+  return post<RevisedAssignment>("/api/preview", {
+    assignmentText,
+    lockedObjective,
+    repairs,
+  });
+}
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ assignmentText: text, lockedObjective }),
+    body: JSON.stringify(body),
   }).catch(() => null);
 
-  if (!response || !response.ok) {
+  if (!response) {
     throw new AnalysisUnavailableError(
-      "Live analysis is not connected yet. Load one of the sample assignments to explore the full flow."
+      "Could not reach the analysis service. Check your connection and try again."
     );
   }
 
-  return (await response.json()) as Analysis;
+  if (!response.ok) {
+    const message = await response
+      .json()
+      .then((data: { error?: string }) => data.error)
+      .catch(() => null);
+    throw new AnalysisUnavailableError(
+      message ?? "The analysis service returned an error. Try again."
+    );
+  }
+
+  return (await response.json()) as T;
 }
