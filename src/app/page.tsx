@@ -31,6 +31,7 @@ import {
   extractObjectives,
 } from "@/lib/analysisSource";
 import { buildSummary, downloadSummary, summaryFilename } from "@/lib/exportSummary";
+import { applyRepairs } from "@/lib/repairs";
 import type { Analysis, FrictionMoment, RevisedAssignment, Step } from "@/lib/schema";
 import { BIOLOGY_SAMPLE, BIOLOGY_TEXT } from "@/samples/biology";
 
@@ -77,6 +78,22 @@ export default function Home() {
   );
   const report = useMemo(() => runEngine(analysis, analyzedText), [analysis, analyzedText]);
   const confidence = useMemo(() => scoreAccessibility(report, analysis), [report, analysis]);
+
+  // The same graph with accepted repairs applied. Everything downstream — the
+  // score, the constraint tests — recomputes from this, so an applied repair
+  // visibly removes the barrier instead of only being recorded.
+  const repairedAnalysis = useMemo(
+    () => applyRepairs(analysis, appliedRepairIds),
+    [analysis, appliedRepairIds],
+  );
+  const repairedReport = useMemo(
+    () => runEngine(repairedAnalysis, analyzedText),
+    [repairedAnalysis, analyzedText],
+  );
+  const repairedConfidence = useMemo(
+    () => scoreAccessibility(repairedReport, repairedAnalysis),
+    [repairedReport, repairedAnalysis],
+  );
 
   const selectedStep = useMemo(() => {
     const matched = selectedFriction.stepIds
@@ -251,7 +268,13 @@ export default function Home() {
             />
           )}
           {stage === "repair" && <RepairScreen steps={steps} onApply={addRepair} onKeep={keepCurrent} onCustomize={customizeRepair} />}
-          {stage === "constraint" && <ConstraintTest key={condition} analysis={analysis} report={report} condition={condition} />}
+          {stage === "constraint" && <ConstraintTest
+              key={condition}
+              analysis={analysis}
+              repairedAnalysis={repairedAnalysis}
+              report={report}
+              condition={condition}
+            />}
           {stage === "preview" && (
             <StudentPreview
               objective={objective}
@@ -266,6 +289,8 @@ export default function Home() {
               frictionCount={analysis.frictionMoments.length}
               repairsApplied={appliedRepairIds.length}
               goalPreserved={goalPreserved}
+              scoreBefore={confidence.score}
+              scoreAfter={repairedConfidence.score}
               canExport={revised !== null}
               onExport={exportSummary}
             />

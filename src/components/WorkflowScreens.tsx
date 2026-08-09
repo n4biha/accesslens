@@ -316,7 +316,7 @@ function toImperative(verb: string): string {
   return verb;
 }
 
-function nodeLabel(action: string): string {
+function imperativeAction(action: string): string {
   const words = action.trim().split(/\s+/);
   if (words.length === 0) return action;
 
@@ -327,6 +327,13 @@ function nodeLabel(action: string): string {
     words[andIndex + 1] = toImperative(words[andIndex + 1]);
   }
 
+  const label = words.join(" ").replace(/[,;:]$/, "");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function nodeLabel(action: string): string {
+  const words = imperativeAction(action).split(/\s+/);
+
   const clipped = words.length > 5;
   const kept = clipped ? words.slice(0, 5) : [...words];
 
@@ -336,11 +343,17 @@ function nodeLabel(action: string): string {
   while (clipped && kept.length > 2 && DANGLING.test(kept[kept.length - 1])) kept.pop();
 
   const label = kept.join(" ").replace(/[,;:]$/, "");
-  return label.charAt(0).toUpperCase() + label.slice(1) + (clipped ? "…" : "");
+  return label + (clipped ? "…" : "");
 }
 
 export function JourneyScan({ analysis, report }: JourneyScanProps) {
   const { goTo, selectFriction } = useWorkflow();
+  const journeyPathRef = useRef<HTMLOListElement>(null);
+  const [selectedStepId, setSelectedStepId] = useState(() => (
+    analysis.steps.find((step) => analysis.frictionMoments.some((friction) => friction.stepIds.includes(step.id)))?.id
+    ?? analysis.steps[0]?.id
+    ?? ""
+  ));
   const frictionByStep = useMemo(() => {
     const map = new Map<string, FrictionMoment[]>();
     analysis.frictionMoments.forEach((friction) => {
@@ -350,6 +363,35 @@ export function JourneyScan({ analysis, report }: JourneyScanProps) {
   }, [analysis]);
   const incidental = analysis.steps.filter((step) => step.goalRelevance === "incidental").length;
   const essentialRisks = analysis.steps.filter((step) => step.goalRelevance === "essential" && step.repair).length;
+  const selectedStepIndex = Math.max(0, analysis.steps.findIndex((step) => step.id === selectedStepId));
+  const selectedStep = analysis.steps[selectedStepIndex];
+  const selectedFrictions = selectedStep ? frictionByStep.get(selectedStep.id) ?? [] : [];
+
+  function selectStep(index: number) {
+    const nextStep = analysis.steps[index];
+    if (!nextStep) return;
+
+    setSelectedStepId(nextStep.id);
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const usesVerticalTimeline = window.matchMedia("(max-width: 580px)").matches;
+    window.requestAnimationFrame(() => {
+      const scrollTarget = usesVerticalTimeline
+        ? document.getElementById("journey-step-detail")
+        : journeyPathRef.current?.children[index];
+      scrollTarget?.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: usesVerticalTimeline ? "start" : "nearest",
+        inline: "center",
+      });
+    });
+  }
+
+  function affectedStepNumbers(friction: FrictionMoment): string {
+    return friction.stepIds
+      .map((stepId) => analysis.steps.findIndex((step) => step.id === stepId) + 1)
+      .filter((stepNumber) => stepNumber > 0)
+      .join(", ");
+  }
 
   return (
     <main className="workflow-main journey-screen">
@@ -358,47 +400,130 @@ export function JourneyScan({ analysis, report }: JourneyScanProps) {
         title="The task, seen as a student journey"
         subtitle="We break the task into real student actions to reveal where accessibility friction occurs."
       />
-      <section className="journey-scroll" aria-label={`${analysis.steps.length} task steps`}>
-        <ol className="journey-path">
+      <section className="journey-explorer" aria-labelledby="journey-overview-title">
+        <header className="journey-toolbar">
+          <div>
+            <p className="eyebrow">Journey overview</p>
+            <h2 id="journey-overview-title">Follow the task step by step</h2>
+            <p>Select a step to inspect its environment, demands, and accessibility friction.</p>
+          </div>
+          <nav className="journey-controls" aria-label="Journey step controls">
+            <span aria-live="polite">Step {selectedStepIndex + 1} of {analysis.steps.length}</span>
+            <button
+              type="button"
+              onClick={() => selectStep(selectedStepIndex - 1)}
+              disabled={selectedStepIndex === 0}
+              aria-label="View previous step"
+            >
+              <ArrowLeft size={17} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => selectStep(selectedStepIndex + 1)}
+              disabled={selectedStepIndex === analysis.steps.length - 1}
+              aria-label="View next step"
+            >
+              <ArrowRight size={17} aria-hidden="true" />
+            </button>
+          </nav>
+        </header>
+
+        <dl className="journey-summary" aria-label="Journey summary">
+          <div><dt>Friction moments</dt><dd>{analysis.frictionMoments.length}</dd></div>
+          <div><dt>Incidental demands</dt><dd>{incidental}</dd></div>
+          <div><dt>Essential demands with risk</dt><dd>{essentialRisks}</dd></div>
+          <div><dt>Learning environments</dt><dd>{report.switching.uniqueEnvironments.length}</dd></div>
+        </dl>
+
+        <div className="journey-scroll" aria-label={`${analysis.steps.length} task steps`}>
+          <ol className="journey-path" ref={journeyPathRef}>
           {analysis.steps.map((step, index) => {
             const frictions = frictionByStep.get(step.id) ?? [];
             const primaryFriction = frictions[0];
+            const isSelected = step.id === selectedStep?.id;
             return (
-              <li key={step.id} className="journey-step">
-                <div className="friction-space">
-                  {primaryFriction && (
-                    <button
-                      type="button"
-                      className={`friction-marker severity-${primaryFriction.severity}`}
-                      onClick={() => { selectFriction(primaryFriction); goTo("barrier"); }}
-                      aria-label={`${primaryFriction.title}, ${SEVERITY_LABEL[primaryFriction.severity]} severity`}
-                    >
-                      <AlertTriangle size={13} aria-hidden="true" />
-                      <span>{primaryFriction.title}</span>
-                      <strong>{SEVERITY_LABEL[primaryFriction.severity]}</strong>
-                    </button>
+              <li key={step.id} className={`journey-step${isSelected ? " is-selected" : ""}`}>
+                <button
+                  type="button"
+                  className="journey-card"
+                  onClick={() => selectStep(index)}
+                  aria-current={isSelected ? "step" : undefined}
+                  aria-controls="journey-step-detail"
+                >
+                  <span className="journey-card-topline">
+                    <span className="node-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span className={`relevance-pill relevance-${step.goalRelevance}`}>{RELEVANCE_LABEL[step.goalRelevance]}</span>
+                  </span>
+                  <strong className="node-label">{nodeLabel(step.action)}</strong>
+                  <span className="journey-environment"><Link2 size={14} aria-hidden="true" /> {step.environment}</span>
+                  {primaryFriction ? (
+                    <span className={`journey-status severity-${primaryFriction.severity}`}>
+                      <AlertTriangle size={14} aria-hidden="true" />
+                      {SEVERITY_LABEL[primaryFriction.severity]}
+                      {frictions.length > 1 && <small>{frictions.length} issues</small>}
+                    </span>
+                  ) : (
+                    <span className="journey-status journey-status--clear"><Check size={14} aria-hidden="true" /> No friction flagged</span>
                   )}
-                </div>
-                <button type="button" className="journey-node" aria-describedby={`tooltip-${step.id}`}>
-                  <span className="node-number">{index + 1}</span>
-                  <span className="node-label">{nodeLabel(step.action)}</span>
                 </button>
-                <div className="journey-tooltip" id={`tooltip-${step.id}`} role="tooltip">
-                  <strong>{step.environment}</strong>
-                  <span>{RELEVANCE_LABEL[step.goalRelevance]} to goal</span>
-                  <DemandChips demands={step.demands} />
-                </div>
               </li>
             );
           })}
-        </ol>
+          </ol>
+        </div>
+
+        {selectedStep && (
+          <article className="journey-step-detail" id="journey-step-detail" aria-labelledby="selected-step-title">
+            <div className="journey-step-context">
+              <p className="eyebrow">Selected step · {String(selectedStepIndex + 1).padStart(2, "0")}</p>
+              <h2 id="selected-step-title">{imperativeAction(selectedStep.action)}</h2>
+              <div className="journey-step-meta">
+                <span><Link2 size={14} aria-hidden="true" /> {selectedStep.environment}</span>
+                <span>{RELEVANCE_LABEL[selectedStep.goalRelevance]} to goal</span>
+              </div>
+              <div className="journey-demand-block">
+                <h3>Functional demands</h3>
+                <DemandChips demands={selectedStep.demands} />
+              </div>
+            </div>
+
+            <div className="journey-friction-detail">
+              {selectedFrictions.length > 0 ? (
+                <>
+                  <p className="eyebrow">Friction at this step</p>
+                  <div className="journey-friction-list">
+                    {selectedFrictions.map((friction) => (
+                      <section key={friction.id} className="journey-friction-card" aria-labelledby={`friction-title-${friction.id}`}>
+                        <div className="journey-friction-heading">
+                          <span className={`severity-${friction.severity}`}><AlertTriangle size={14} aria-hidden="true" /> {SEVERITY_LABEL[friction.severity]}</span>
+                          <span>Affects steps {affectedStepNumbers(friction)}</span>
+                        </div>
+                        <h3 id={`friction-title-${friction.id}`}>{friction.title}</h3>
+                        <p>{friction.explanation}</p>
+                        <button
+                          type="button"
+                          className="button button--secondary button--small"
+                          onClick={() => { selectFriction(friction); goTo("barrier"); }}
+                        >
+                          Review friction <ArrowRight size={15} aria-hidden="true" />
+                        </button>
+                      </section>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="journey-no-friction">
+                  <span><CheckCircle2 size={19} aria-hidden="true" /></span>
+                  <div>
+                    <h3>No friction flagged here</h3>
+                    <p>This step does not contain a detected accessibility barrier.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </article>
+        )}
       </section>
-      <div className="journey-summary">
-        <div><strong>{analysis.frictionMoments.length}</strong><span>Friction moments</span></div>
-        <div><strong>{incidental}</strong><span>Incidental demands</span></div>
-        <div><strong>{essentialRisks}</strong><span>Essential demands with risk</span></div>
-        <div><strong>{report.switching.uniqueEnvironments.length}</strong><span>Learning environments</span></div>
-      </div>
     </main>
   );
 }
@@ -564,15 +689,33 @@ export const CONDITIONS: ConditionDefinition[] = [
   { id: "reduced_motion", label: "Reduced motion", icon: RotateCcw, fails: () => false },
 ];
 
-export interface ConstraintTestProps { analysis: Analysis; report: EngineReport; condition: string }
+export interface ConstraintTestProps {
+  analysis: Analysis;
+  /** The same graph with accepted repairs applied, so results can be recomputed. */
+  repairedAnalysis: Analysis;
+  report: EngineReport;
+  condition: string;
+}
 
-export function ConstraintTest({ analysis, report, condition }: ConstraintTestProps) {
+export function ConstraintTest({ analysis, repairedAnalysis, report, condition }: ConstraintTestProps) {
   const { goTo, selectCondition } = useWorkflow();
   const selected = CONDITIONS.find((item) => item.id === condition) ?? CONDITIONS[0];
   const unavailable = selected.id === "reduced_motion";
   const [visibleCount, setVisibleCount] = useState(0);
   const failedSteps = analysis.steps.filter(selected.fails);
-  const focusedStep = failedSteps[0] ?? analysis.steps[0];
+
+  // Recomputed, not projected: the repaired graph is run through the same
+  // predicate, so a step only reads "PASS after repair" when it genuinely does.
+  const repairedById = useMemo(
+    () => new Map(repairedAnalysis.steps.map((step) => [step.id, step])),
+    [repairedAnalysis],
+  );
+  const stillFailing = failedSteps.filter((step) => {
+    const repaired = repairedById.get(step.id);
+    return !repaired || selected.fails(repaired);
+  });
+  const fixedCount = failedSteps.length - stillFailing.length;
+  const focusedStep = stillFailing[0] ?? failedSteps[0] ?? analysis.steps[0];
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -606,7 +749,13 @@ export function ConstraintTest({ analysis, report, condition }: ConstraintTestPr
         <section className="journey-results" aria-labelledby="results-title">
           <div className="result-heading">
             <div><p className="eyebrow">Journey results</p><h2 id="results-title">{selected.label}</h2></div>
-            {!unavailable && <span>{failedSteps.length} of {analysis.steps.length} steps fail</span>}
+            {!unavailable && (
+              <span>
+                {fixedCount > 0
+                  ? `${stillFailing.length} of ${analysis.steps.length} steps fail — ${fixedCount} fixed by your repairs`
+                  : `${failedSteps.length} of ${analysis.steps.length} steps fail`}
+              </span>
+            )}
           </div>
           {unavailable ? (
             <div className="unavailable-state"><RotateCcw size={24} aria-hidden="true" /><h3>Not represented in task data</h3><p>The current demand schema does not describe motion dependencies, so AccessLens will not invent a result.</p></div>
@@ -614,20 +763,34 @@ export function ConstraintTest({ analysis, report, condition }: ConstraintTestPr
             <ol className="test-steps">
               {analysis.steps.map((step, index) => {
                 const fails = selected.fails(step);
+                const repaired = repairedById.get(step.id);
+                const fixed = fails && repaired !== undefined && !selected.fails(repaired);
                 return (
                   <li key={step.id} className={index < visibleCount ? "is-visible" : ""}>
-                    <span>{index + 1}</span><p>{step.action}</p><strong className={fails ? "result-fail" : "result-pass"}>{fails ? "FAIL" : "PASS"}</strong>
+                    <span>{index + 1}</span>
+                    <p>{step.action}</p>
+                    {fixed ? (
+                      <strong className="result-fixed">
+                        <s>FAIL</s> PASS after repair
+                      </strong>
+                    ) : (
+                      <strong className={fails ? "result-fail" : "result-pass"}>{fails ? "FAIL" : "PASS"}</strong>
+                    )}
                   </li>
                 );
               })}
             </ol>
           )}
-          {!unavailable && failedSteps.length > 0 && (
+          {!unavailable && stillFailing.length > 0 && (
             <article className="failure-explanation">
               <p className="eyebrow">Why this fails</p>
               <h3>{focusedStep.action}</h3>
               <p>{focusedStep.relevanceReason}</p>
-              {focusedStep.repair && <span><CheckCircle2 size={15} aria-hidden="true" /> Projected after suggested repair: PASS</span>}
+              {focusedStep.repair && (
+                <span>
+                  <CheckCircle2 size={15} aria-hidden="true" /> Applying the suggested repair clears this step
+                </span>
+              )}
             </article>
           )}
         </section>
@@ -772,9 +935,11 @@ export interface CompleteScreenProps {
   goalPreserved: boolean;
   onExport: () => void;
   canExport: boolean;
+  scoreBefore: number;
+  scoreAfter: number;
 }
 
-export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved, onExport, canExport }: CompleteScreenProps) {
+export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved, onExport, canExport, scoreBefore, scoreAfter }: CompleteScreenProps) {
   const { startOver } = useWorkflow();
   return (
     <main className="complete-screen">
@@ -786,6 +951,12 @@ export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved, o
         <p><CheckCircle2 size={18} aria-hidden="true" /><span>Learning goal {goalPreserved ? "preserved" : "needs review"}</span></p>
         <p><span>{frictionCount}</span><small>friction moments reviewed</small></p>
         <p><span>{repairsApplied}</span><small>repairs applied</small></p>
+        {scoreAfter > scoreBefore && (
+          <p className="complete-delta">
+            <span>{scoreBefore}<em> → </em>{scoreAfter}</span>
+            <small>task accessibility confidence, recomputed</small>
+          </p>
+        )}
       </div>
       <div className="complete-actions">
         <button type="button" className="button button--primary" onClick={onExport} disabled={!canExport}>
