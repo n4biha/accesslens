@@ -6,6 +6,8 @@ import {
   analyzeSwitching,
   analyzeText,
   analyzeTiming,
+  runEngine,
+  scoreAccessibility,
   WORKING_MEMORY_CAPACITY,
 } from "./engine";
 import type { Analysis, Step } from "./schema";
@@ -165,4 +167,47 @@ test("empty text does not throw", () => {
   const report = analyzeText("");
   assert.equal(report.wordCount, 0);
   assert.equal(report.instructionDensity, 0);
+});
+
+test("confidence score deducts only from measured friction", () => {
+  const report = runEngine(analysis, "Some assignment text.");
+  const { score, breakdown } = scoreAccessibility(report, analysis);
+
+  // 1 item over capacity (-8), 5 values carried across a switch (-25),
+  // 1 switch beyond three (-3), a tight limit (-8), and a slower reader
+  // running out entirely (-5) = 49 deducted from 100.
+  assert.equal(score, 51);
+  assert.equal(
+    breakdown.reduce((sum, item) => sum + item.points, 0),
+    -49
+  );
+  assert.ok(breakdown.every((item) => item.points < 0));
+});
+
+test("a task with no measured friction scores 100", () => {
+  const clean: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [],
+    steps: [step({ id: "a", environment: "Canvas" })],
+  };
+  const report = runEngine(clean, "Read the page.");
+  const { score, breakdown } = scoreAccessibility(report, clean);
+  assert.equal(score, 100);
+  assert.deepEqual(breakdown, []);
+});
+
+test("score never falls below zero", () => {
+  const brutal: Analysis = {
+    ...analysis,
+    frictionMoments: Array.from({ length: 40 }, (_, i) => ({
+      id: `f${i}`,
+      title: "friction",
+      stepIds: ["s2"],
+      severity: "high" as const,
+      barrierType: "working_memory" as const,
+      explanation: "",
+    })),
+  };
+  const report = runEngine(brutal, "text");
+  assert.equal(scoreAccessibility(report, brutal).score, 0);
 });

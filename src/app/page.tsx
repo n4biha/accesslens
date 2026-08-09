@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
-import AccessibilityScore, { type AccessibilityScoreData } from "@/components/AccessibilityScore";
+import AccessibilityScore from "@/components/AccessibilityScore";
 import AppNav from "@/components/AppNav";
 import IntroScreen from "@/components/IntroScreen";
 import {
@@ -22,7 +22,7 @@ import {
   type ConditionId,
   type WorkflowStage,
 } from "@/components/WorkflowContext";
-import { runEngine } from "@/lib/engine";
+import { runEngine, scoreAccessibility } from "@/lib/engine";
 import { shortCitation } from "@/lib/standards";
 import {
   AnalysisUnavailableError,
@@ -40,17 +40,6 @@ function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return "Something went wrong analysing that assignment. Try again.";
 }
-
-const BIOLOGY_CONFIDENCE: AccessibilityScoreData = {
-  score: 72,
-  breakdown: [
-    { label: "Goal alignment", points: 24 },
-    { label: "Information persistence", points: 12 },
-    { label: "Interaction flexibility", points: 12 },
-    { label: "Timing flexibility", points: 10 },
-    { label: "Response options", points: 14 },
-  ],
-};
 
 const STATUS_LABEL: Record<WorkflowStage, string> = {
   intro: "AccessLens introduction",
@@ -82,6 +71,7 @@ export default function Home() {
     [baseAnalysis, steps],
   );
   const report = useMemo(() => runEngine(analysis, analyzedText), [analysis, analyzedText]);
+  const confidence = useMemo(() => scoreAccessibility(report, analysis), [report, analysis]);
 
   const selectedStep = useMemo(() => {
     const matched = selectedFriction.stepIds
@@ -208,7 +198,7 @@ export default function Home() {
             <>
               <JourneyScan analysis={analysis} report={report} />
               <section className="journey-bottom">
-                <AccessibilityScore {...BIOLOGY_CONFIDENCE} />
+                <AccessibilityScore {...confidence} />
                 <button
                   type="button"
                   className="button button--primary"

@@ -302,6 +302,78 @@ export function analyzeText(assignmentText: string): TextReport {
   };
 }
 
+export interface ScoreDeduction {
+  label: string;
+  points: number;
+}
+
+export interface AccessibilityScore {
+  score: number;
+  breakdown: ScoreDeduction[];
+}
+
+/**
+ * A single figure for how much task-level friction the design carries. It is
+ * derived entirely from measurements above and from the goal-relevance calls
+ * the educator can see and overrule — there is no model-supplied number in it,
+ * and the breakdown is surfaced in the interface so any figure can be traced
+ * back to the thing that caused it.
+ *
+ * Deliberately not a compliance score: it says nothing about WCAG conformance.
+ */
+export function scoreAccessibility(
+  report: EngineReport,
+  analysis: Analysis
+): AccessibilityScore {
+  const breakdown: ScoreDeduction[] = [];
+  const deduct = (label: string, points: number) => {
+    if (points > 0) breakdown.push({ label, points: -points });
+  };
+
+  const overCapacity = Math.max(0, report.memory.peakLoad - report.memory.capacity);
+  deduct(
+    `Working memory ${report.memory.peakLoad} items at peak, above the ~${report.memory.capacity}-item capacity`,
+    overCapacity * 8
+  );
+
+  const decaying = report.memory.carried.filter((item) => item.decayRisk).length;
+  deduct(
+    `${decaying} value${decaying === 1 ? "" : "s"} carried across an environment change`,
+    decaying * 5
+  );
+
+  const extraSwitches = Math.max(0, report.switching.transitions - 3);
+  deduct(`${report.switching.transitions} environment switches`, extraSwitches * 3);
+
+  if (report.timing.verdict === "infeasible") {
+    deduct("Time limit is shorter than the task requires", 15);
+  } else if (report.timing.verdict === "tight") {
+    deduct("Time limit leaves little margin", 8);
+  }
+  if (
+    report.timing.verdict !== "infeasible" &&
+    report.timing.verdictConservative === "infeasible"
+  ) {
+    deduct("A slower reader would run out of time", 5);
+  }
+
+  const high = analysis.frictionMoments.filter((f) => f.severity === "high").length;
+  const medium = analysis.frictionMoments.filter((f) => f.severity === "medium").length;
+  deduct(`${high} high-severity friction moment${high === 1 ? "" : "s"}`, high * 4);
+  deduct(`${medium} moderate friction moment${medium === 1 ? "" : "s"}`, medium * 2);
+
+  const incidental = analysis.steps.filter(
+    (step) => step.goalRelevance === "incidental" && step.repair !== null
+  ).length;
+  deduct(
+    `${incidental} repairable demand${incidental === 1 ? "" : "s"} unrelated to the goal`,
+    incidental * 2
+  );
+
+  const total = breakdown.reduce((sum, item) => sum + item.points, 0);
+  return { score: Math.max(0, Math.min(100, 100 + total)), breakdown };
+}
+
 export function runEngine(analysis: Analysis, assignmentText: string): EngineReport {
   return {
     memory: analyzeMemory(analysis.steps),

@@ -27,10 +27,14 @@ export default function AccessibilityScore({
             How this is calculated <ChevronDown size={15} aria-hidden="true" />
           </summary>
           <ul>
+            <li>
+              <span>Starting score</span>
+              <strong>100</strong>
+            </li>
             {breakdown.map((item) => (
               <li key={item.label}>
                 <span>{item.label}</span>
-                <strong>+{item.points}</strong>
+                <strong>{item.points < 0 ? `−${Math.abs(item.points)}` : `+${item.points}`}</strong>
               </li>
             ))}
           </ul>
