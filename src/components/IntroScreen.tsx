@@ -158,6 +158,7 @@ export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
             onError={() => setAssetSettled(true)}
           />
         </div>
+        <div className="intro-lens-aperture" />
         <div className="intro-optical-bloom" />
         <div className="intro-light-sweep" />
         <div className="intro-artwork-shade" />

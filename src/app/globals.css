@@ -464,6 +464,7 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 .intro-screen--lens {
   --intro-lens-x: 76.4%;
   --intro-lens-y: 44.4%;
+  --intro-lens-size: max(96svh, 52vw);
   position: relative;
   min-height: 100svh;
   display: flex;
@@ -483,12 +484,18 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
   inset: 0;
   overflow: hidden;
   opacity: 0;
-  transition: opacity 900ms ease;
-  will-change: opacity;
+  transform: scale(1.075);
+  transform-origin: var(--intro-lens-x) var(--intro-lens-y);
+  transition:
+    opacity 900ms ease,
+    transform 3600ms cubic-bezier(0.22, 0.61, 0.21, 1);
+  will-change: opacity, transform;
+  backface-visibility: hidden;
 }
 
 .intro-screen--lens:not([data-phase="idle"]) .intro-artwork {
   opacity: 1;
+  transform: scale(1);
 }
 
 .intro-artwork-layer,
@@ -509,6 +516,35 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 
 .intro-artwork-layer--sharp {
   filter: none;
+}
+
+.intro-lens-aperture {
+  position: absolute;
+  z-index: 1;
+  left: var(--intro-lens-x);
+  top: var(--intro-lens-y);
+  width: 6vmin;
+  height: 6vmin;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 7px rgba(8, 5, 7, 0.16),
+    0 0 0 200vmax rgba(8, 5, 7, 0.36);
+  transform: translate(-50%, -50%);
+  transition:
+    width 1450ms cubic-bezier(0.2, 0.74, 0.22, 1),
+    height 1450ms cubic-bezier(0.2, 0.74, 0.22, 1);
+  pointer-events: none;
+}
+
+.intro-screen--lens:is(
+  [data-phase="lens"],
+  [data-phase="headline"],
+  [data-phase="description"],
+  [data-phase="actions"],
+  [data-phase="ready"]
+) .intro-lens-aperture {
+  width: var(--intro-lens-size);
+  height: var(--intro-lens-size);
 }
 
 .intro-optical-bloom,
@@ -546,9 +582,8 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 .intro-light-sweep {
   z-index: 3;
   inset: -18% auto -18% 56%;
-  width: 18%;
-  background: linear-gradient(90deg, transparent, rgba(255, 225, 214, 0.16), transparent);
-  filter: blur(20px);
+  width: 24%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 225, 214, 0.04) 28%, rgba(255, 225, 214, 0.13) 50%, rgba(255, 225, 214, 0.04) 72%, transparent 100%);
   opacity: 0;
   transform: translateX(-90%) skewX(-12deg);
 }
@@ -612,6 +647,7 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 .intro-screen--lens.is-sequence-complete .intro-copy { pointer-events: auto; }
 
 .intro-screen--lens.is-instant .intro-artwork,
+.intro-screen--lens.is-instant .intro-lens-aperture,
 .intro-screen--lens.is-instant .intro-optical-bloom,
 .intro-screen--lens.is-instant .intro-copy,
 .intro-screen--lens.is-instant .intro-copy > * {
@@ -744,6 +780,7 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
   .intro-screen--lens {
     --intro-lens-x: 73%;
     --intro-lens-y: 23.5%;
+    --intro-lens-size: 104vw;
     min-height: 100svh;
     display: grid;
     grid-template-rows: minmax(270px, 43svh) auto;
@@ -792,6 +829,7 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 
 @media (prefers-reduced-motion: reduce) {
   .intro-screen--lens .intro-artwork,
+  .intro-screen--lens .intro-lens-aperture,
   .intro-screen--lens .intro-optical-bloom,
   .intro-screen--lens .intro-light-sweep,
   .intro-screen--lens .intro-copy,
@@ -825,3 +863,39 @@ button.progress-link:hover .progress-number { border-color: var(--rose-deep); co
 .result-fixed { display: inline-flex; align-items: baseline; gap: 0.4rem; color: var(--green); font-size: 0.7rem; letter-spacing: 0.06em; }
 .result-fixed s { color: var(--muted); text-decoration-thickness: 1px; opacity: 0.75; }
 .complete-delta span em { color: var(--muted); font-style: normal; }
+
+/* Access tools — presentation changes a student can make for themselves */
+.revision-compare.is-spaced .assignment-body {
+  line-height: 2.15;
+  letter-spacing: 0.022em;
+  word-spacing: 0.14em;
+}
+
+.revision-compare.is-decluttered { grid-template-columns: minmax(0, 1fr); }
+
+/* Hide the original only when a revised version actually exists to show, and
+   target it by class rather than position, so decluttering can never leave the
+   student looking at an empty panel. */
+.revision-compare.is-decluttered:has(.student-assignment--revised .assignment-body)
+  > .student-assignment:not(.student-assignment--revised) { display: none; }
+.revision-compare.is-decluttered .student-assignment { border-color: transparent; box-shadow: none; }
+.revision-compare.is-decluttered > .student-assignment > header { background: transparent; }
+
+.revision-changes.is-hidden { display: none; }
+
+.access-tools label span { display: flex; flex-direction: column; gap: 0.15rem; }
+.access-tools label span small { color: var(--muted); font-size: 0.7rem; line-height: 1.35; }
+
+.access-tools label.is-roadmap { opacity: 0.72; }
+.access-tools label.is-roadmap em {
+  flex-shrink: 0;
+  padding: 0.16rem 0.44rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}

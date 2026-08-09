@@ -819,11 +819,26 @@ export interface StudentPreviewProps {
   onRevised: (revised: RevisedAssignment) => void;
 }
 
-const ACCESS_TOOLS = ["Chunk instructions", "Keep references visible", "Reduce visual clutter", "Read aloud", "Increase spacing", "Highlight current step"];
+interface AccessTool {
+  id: string;
+  label: string;
+  hint: string;
+  /** False when the control is not wired to behaviour yet; it is then shown as Roadmap
+   *  rather than as a toggle that quietly does nothing. */
+  live: boolean;
+}
+
+const ACCESS_TOOLS: AccessTool[] = [
+  { id: "spacing", label: "Increase spacing", hint: "Wider line and letter spacing", live: true },
+  { id: "declutter", label: "Reduce visual clutter", hint: "Show only the revised assignment", live: true },
+  { id: "readAloud", label: "Read aloud", hint: "Speak the revised assignment", live: true },
+  { id: "chunk", label: "Chunk instructions", hint: "One step at a time", live: false },
+  { id: "highlight", label: "Highlight current step", hint: "Dim everything else", live: false },
+];
 
 export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText, onRevised }: StudentPreviewProps) {
   const { goTo } = useWorkflow();
-  const [tools, setTools] = useState<Record<string, boolean>>({ "Keep references visible": true, "Highlight current step": true });
+  const [tools, setTools] = useState<Record<string, boolean>>({ spacing: false, declutter: false, readAloud: false });
   const [revised, setRevised] = useState<RevisedAssignment | null>(null);
   const [message, setMessage] = useState("");
 
@@ -857,11 +872,30 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
 
   const loading = accepted.length > 0 && revised === null && message === "";
 
+  // Read aloud uses the browser's own speech synthesis, so it works without a
+  // network call and stops cleanly when switched off or when leaving the screen.
+  useEffect(() => {
+    const speech = typeof window === "undefined" ? undefined : window.speechSynthesis;
+    if (!speech) return;
+    if (!tools.readAloud || !revised) {
+      speech.cancel();
+      return;
+    }
+    speech.cancel();
+    const utterance = new SpeechSynthesisUtterance(`${revised.title}. ${revised.revisedText}`);
+    utterance.rate = 0.95;
+    speech.speak(utterance);
+    return () => speech.cancel();
+  }, [tools.readAloud, revised]);
+
   return (
     <main className="workflow-main student-preview-screen">
       <ScreenHeading eyebrow="Preview" title="Student Preview" subtitle="A calmer path through the same academic work." />
 
-      <section className="revision-compare" aria-label="Original and revised assignment">
+      <section
+        className={`revision-compare${tools.spacing ? " is-spaced" : ""}${tools.declutter ? " is-decluttered" : ""}`}
+        aria-label="Original and revised assignment"
+      >
         <article className="student-assignment">
           <header><p>Original</p><span>As students receive it today</span></header>
           <section className="student-goal"><p className="eyebrow">Your goal</p><h2>{objective}</h2></section>
@@ -900,7 +934,7 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
       </section>
 
       {revised && revised.changes.length > 0 && (
-        <section className="revision-changes" aria-labelledby="changes-title">
+        <section className={`revision-changes${tools.declutter ? " is-hidden" : ""}`} aria-labelledby="changes-title">
           <h2 id="changes-title">What changed, and why</h2>
           <ol>
             {revised.changes.map((change) => (
@@ -919,7 +953,26 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
           <p>Personalize how the assignment is presented.</p>
           <div>
             {ACCESS_TOOLS.map((tool) => (
-              <label key={tool}><span>{tool}</span><input type="checkbox" checked={Boolean(tools[tool])} onChange={(event) => setTools((current) => ({ ...current, [tool]: event.target.checked }))} /><i aria-hidden="true" /></label>
+              <label key={tool.id} className={tool.live ? "" : "is-roadmap"}>
+                <span>
+                  {tool.label}
+                  <small>{tool.hint}</small>
+                </span>
+                {tool.live ? (
+                  <>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(tools[tool.id])}
+                      onChange={(event) =>
+                        setTools((current) => ({ ...current, [tool.id]: event.target.checked }))
+                      }
+                    />
+                    <i aria-hidden="true" />
+                  </>
+                ) : (
+                  <em>Roadmap</em>
+                )}
+              </label>
             ))}
           </div>
         </aside>
