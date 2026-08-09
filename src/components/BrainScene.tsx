@@ -3,11 +3,14 @@
 import {
   ContactShadows,
   Environment,
+  Instance,
+  Instances,
   Lightformer,
   OrbitControls,
+  Preload,
   useGLTF,
 } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   Component,
   Suspense,
@@ -91,32 +94,30 @@ class SceneErrorBoundary extends Component<{ children: ReactNode }, { failed: bo
 
 function NeuralDetails() {
   return (
-    <group renderOrder={3}>
+    <Instances limit={NEURAL_NODES.length} renderOrder={3}>
+      <sphereGeometry args={[1, 10, 10]} />
+      <meshBasicMaterial color="#ffe7da" toneMapped={false} />
       {NEURAL_NODES.map(([x, y, z, radius], index) => (
-        <mesh key={index} position={[x, y, z]}>
-          <sphereGeometry args={[radius, 12, 12]} />
-          <meshBasicMaterial color="#ffe7da" toneMapped={false} />
-        </mesh>
+        <Instance key={index} position={[x, y, z]} scale={radius} />
       ))}
-    </group>
+    </Instances>
   );
 }
 
 function SurroundingDetails() {
   return (
-    <group>
+    <Instances limit={AMBIENT_POINTS.length}>
+      <sphereGeometry args={[1, 8, 8]} />
+      <meshBasicMaterial transparent opacity={0.72} toneMapped={false} />
       {AMBIENT_POINTS.map(([x, y, z, radius], index) => (
-        <mesh key={index} position={[x, y, z]}>
-          <sphereGeometry args={[radius, 10, 10]} />
-          <meshBasicMaterial
-            color={index % 3 === 0 ? "#bd6870" : "#ffe9dc"}
-            transparent
-            opacity={index % 3 === 0 ? 0.65 : 0.85}
-            toneMapped={false}
-          />
-        </mesh>
+        <Instance
+          key={index}
+          position={[x, y, z]}
+          scale={radius}
+          color={index % 3 === 0 ? "#bd6870" : "#ffe9dc"}
+        />
       ))}
-    </group>
+    </Instances>
   );
 }
 
@@ -130,6 +131,8 @@ function BrainModel({
   onReady: () => void;
 }) {
   const rig = useRef<Group>(null);
+  const renderedFrames = useRef(0);
+  const invalidate = useThree((state) => state.invalidate);
   const { scene } = useGLTF(MODEL_PATH, false, true);
   const brainMesh = useMemo(() => {
     const meshes: Mesh[] = [];
@@ -152,7 +155,18 @@ function BrainModel({
     };
   }, [scene]);
 
-  useEffect(onReady, [onReady]);
+  const handleRenderedFrame = useCallback(() => {
+    if (renderedFrames.current === 0) {
+      renderedFrames.current = 1;
+      invalidate();
+      return;
+    }
+
+    if (renderedFrames.current === 1) {
+      renderedFrames.current = 2;
+      onReady();
+    }
+  }, [invalidate, onReady]);
 
   useFrame((state, delta) => {
     if (!rig.current || reducedMotion || interacting) return;
@@ -170,23 +184,22 @@ function BrainModel({
           matrixAutoUpdate={false}
           castShadow
           receiveShadow
+          onAfterRender={handleRenderedFrame}
         >
           <meshPhysicalMaterial
-            color="#d2aaa8"
-            roughness={0.12}
+            color="#d5afab"
+            roughness={0.155}
             metalness={0}
-            transmission={0.045}
-            thickness={0.42}
-            ior={1.42}
+            transmission={0}
             clearcoat={1}
-            clearcoatRoughness={0.022}
+            clearcoatRoughness={0.035}
             specularIntensity={1}
             specularColor="#fffaf5"
-            sheen={0.12}
-            sheenRoughness={0.32}
+            sheen={0.08}
+            sheenRoughness={0.38}
             sheenColor="#e8bbb8"
-            attenuationColor="#7d4554"
-            attenuationDistance={5}
+            envMapIntensity={1.08}
+            flatShading={false}
           />
         </mesh>
       </group>
@@ -294,12 +307,12 @@ function Scene({
         enableZoom={false}
         enablePan={false}
         enableDamping
-        dampingFactor={0.055}
-        rotateSpeed={0.46}
+        dampingFactor={0.065}
+        rotateSpeed={0.38}
         minPolarAngle={MIN_POLAR_ANGLE}
         maxPolarAngle={MAX_POLAR_ANGLE}
         autoRotate={interactive && !reducedMotion && !interacting}
-        autoRotateSpeed={0.17}
+        autoRotateSpeed={0.12}
         onStart={onInteractionStart}
         onEnd={onInteractionEnd}
       />
@@ -396,7 +409,7 @@ export default function BrainScene({
         <SceneErrorBoundary>
           <Canvas
             camera={{ position: [0, 0.18, 5.2], fov: 37 }}
-            dpr={[1.25, 2]}
+            dpr={[1.2, 1.75]}
             frameloop={interactive && !reducedMotion ? "always" : "demand"}
             gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
             onCreated={({ gl }) => {
@@ -412,6 +425,7 @@ export default function BrainScene({
               onInteractionStart={pauseIdleRotation}
               onInteractionEnd={resumeIdleRotationLater}
             />
+            <Preload all />
           </Canvas>
         </SceneErrorBoundary>
       ) : null}

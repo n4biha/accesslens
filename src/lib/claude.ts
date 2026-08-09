@@ -43,6 +43,8 @@ The distinction that matters most: a demand is **essential** when the locked lea
 
 Produce one step per discrete student action, in the order a student performs them, from opening the assignment to submitting it. Include actions the assignment implies but does not spell out — returning to a previous environment, locating a resource, switching tabs — because friction lives between steps as often as inside them.
 
+Name each environment with the shortest stable label for the application or medium alone: "Canvas", "PhET simulation", "physical notebook", "audio library". Never add page names, module numbers, quiz titles, or parenthetical detail, and never join two environments with "and" — pick the one the student is primarily acting in. These labels are counted to measure context switching, so "Canvas", "Canvas quiz" and "Canvas (Module 5)" appearing as three separate environments would triple a number the educator is shown. Reuse the identical string every time the student is in the same place.
+
 For each step record which information items it **produces** (results, values, observations the student obtains) and which it **consumes** (items produced earlier that must be at hand here). Use stable snake_case identifiers and reuse the identical identifier across the producing and consuming steps. Set producedInfoStaysVisible to false when leaving the step makes that information disappear, which is what forces the student to memorise or transcribe it.
 
 This dependency information drives the working-memory analysis, so it is the single most important thing to get right. When in doubt about whether a value must be carried, trace what the student physically has on screen at each step.
@@ -65,6 +67,10 @@ Prefer "unknown" over a confident wrong call. An educator correcting a wrong "in
 ## Friction moments
 
 Group related steps into friction moments describing what the student experiences. Write the explanation from the student's perspective, concretely, without hedging. Assign a barrierType from the fixed list; it selects which accessibility standard is cited, so pick the category that names the primary functional barrier.
+
+**Every barrier must be grounded in what this assignment says, not in how the named tools usually behave.** You may draw out what the text implies about the student's own experience — "the simulation does not save your results" implies the values must be memorised, and that is a fair reading. You may not import assumptions about third-party software: that test runners usually colour results red and green, that a portal probably times out, that a video player may lack captions. If the words "typically", "usually", "most", "often", or "probably" would belong in your explanation, you are describing software in general rather than this task, and the finding does not belong. Say only what an educator could confirm by rereading their own assignment.
+
+Sensory barriers in particular need explicit textual grounding: flag sensory_color_only only when the assignment itself distinguishes things by colour, and sensory_audio_only only when it states or clearly implies that required audio has no captions or transcript.
 
 ## Word counts
 
