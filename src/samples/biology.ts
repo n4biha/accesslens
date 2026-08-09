@@ -1,4 +1,16 @@
-import type { Analysis, ObjectiveCandidate, Step } from "@/lib/schema";
+import type { Analysis, ObjectiveCandidate, RepairEffects, Step } from "@/lib/schema";
+
+/** Every effect off, so each repair below can turn on only what it delivers. */
+const NO_EFFECT: RepairEffects = {
+  keepsInfoVisible: false,
+  reducesWorkingMemory: false,
+  reducesFineMotor: false,
+  removesTimePressure: false,
+  reducesReadingLoad: false,
+  addsNonColorCue: false,
+  addsCaptionOrTranscript: false,
+  addsResponseAlternative: false,
+};
 
 export interface Sample {
   id: string;
@@ -43,6 +55,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 140,
     },
+    estimatedMinutes: null,
     evidence: "Read the instructions below",
     goalRelevance: "related",
     relevanceReason:
@@ -66,6 +79,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 1400,
     },
+    estimatedMinutes: null,
     evidence: "the linked background article before you begin",
     goalRelevance: "essential",
     relevanceReason:
@@ -89,6 +103,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 0,
     },
+    estimatedMinutes: null,
     evidence: "Open the PhET diffusion simulation in a new tab.",
     goalRelevance: "related",
     relevanceReason:
@@ -112,6 +127,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 0,
     },
+    estimatedMinutes: null,
     evidence: "drag the molecule markers into the chamber to set up each run",
     goalRelevance: "incidental",
     relevanceReason:
@@ -119,6 +135,7 @@ const steps: Step[] = [
     repair: {
       suggestion:
         "Allow students to either drag a molecule or select it and choose its destination from a list.",
+      effects: { ...NO_EFFECT, reducesFineMotor: true },
       barrierReduced: "Fine-motor precision",
       rigorPreserved: true,
       rigorNote:
@@ -142,6 +159,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 40,
     },
+    estimatedMinutes: null,
     evidence: "Observe and remember your three equilibrium values.",
     goalRelevance: "incidental",
     relevanceReason:
@@ -149,6 +167,7 @@ const steps: Step[] = [
     repair: {
       suggestion:
         "Add a results panel that stays visible beside the quiz, or a notes field that carries the recorded values forward automatically.",
+      effects: { ...NO_EFFECT, keepsInfoVisible: true, reducesWorkingMemory: true },
       barrierReduced: "Working-memory dependency",
       rigorPreserved: true,
       rigorNote:
@@ -172,6 +191,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 0,
     },
+    estimatedMinutes: null,
     evidence: "Close the simulation and return to Canvas.",
     goalRelevance: "incidental",
     relevanceReason:
@@ -195,12 +215,16 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 60,
     },
+    estimatedMinutes: null,
     evidence: "Find the Module 4 quiz",
     goalRelevance: "incidental",
     relevanceReason:
       "Finding the quiz is navigation, unrelated to understanding diffusion.",
     repair: {
       suggestion: "Link directly to the quiz from the instructions.",
+      // Nothing in the demand schema measures how findable the next action is,
+      // so this repair is worth adopting but cannot claim a measured change.
+      effects: NO_EFFECT,
       barrierReduced: "Unclear destination",
       rigorPreserved: true,
       rigorNote: "No academic content changes.",
@@ -223,6 +247,7 @@ const steps: Step[] = [
       communication: "typed",
       wordCount: 40,
     },
+    estimatedMinutes: null,
     evidence: "enter your three values",
     goalRelevance: "incidental",
     relevanceReason:
@@ -230,6 +255,9 @@ const steps: Step[] = [
     repair: {
       suggestion:
         "Show the student's recorded observations alongside the quiz questions.",
+      // Deliberately does not clear the twelve-minute timer: that is a separate
+      // barrier with a separate repair the educator decides on separately.
+      effects: { ...NO_EFFECT, keepsInfoVisible: true, reducesWorkingMemory: true },
       barrierReduced: "Working-memory dependency across a context switch",
       rigorPreserved: true,
       rigorNote:
@@ -253,6 +281,9 @@ const steps: Step[] = [
       communication: "typed",
       wordCount: 220,
     },
+    // The twelve minutes is a deadline for the whole quiz, carried in
+    // timeLimitMinutes; recording it here as well would double-count it.
+    estimatedMinutes: null,
     evidence: "Answer questions 1 through 5 within twelve minutes.",
     goalRelevance: "essential",
     relevanceReason:
@@ -260,6 +291,7 @@ const steps: Step[] = [
     repair: {
       suggestion:
         "Remove the twelve-minute limit, or extend it, unless completing the reasoning quickly is itself being assessed.",
+      effects: { ...NO_EFFECT, removesTimePressure: true },
       barrierReduced: "Processing-speed pressure",
       rigorPreserved: true,
       rigorNote:
@@ -279,10 +311,13 @@ const steps: Step[] = [
       timePressure: 2,
       readingLoad: 0,
       contextSwitch: true,
-      sensory: { colorOnly: false, audioOnly: true },
+      // The student is producing sound here, not receiving it. That is a
+      // communication demand; audioOnly describes information arriving by ear.
+      sensory: { colorOnly: false, audioOnly: false },
       communication: "spoken",
       wordCount: 0,
     },
+    estimatedMinutes: 2,
     evidence: "record a two-minute spoken explanation of what you observed",
     goalRelevance: "incidental",
     relevanceReason:
@@ -290,6 +325,7 @@ const steps: Step[] = [
     repair: {
       suggestion:
         "Accept a recorded explanation, a written explanation, or a live explanation, graded on the same rubric.",
+      effects: { ...NO_EFFECT, addsResponseAlternative: true },
       barrierReduced: "Single required response modality",
       rigorPreserved: true,
       rigorNote:
@@ -313,6 +349,7 @@ const steps: Step[] = [
       communication: "none",
       wordCount: 0,
     },
+    estimatedMinutes: null,
     evidence: "submit it with the quiz",
     goalRelevance: "incidental",
     relevanceReason: "Submission mechanics are unrelated to the objective.",

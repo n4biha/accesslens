@@ -73,7 +73,7 @@ export const demandsSchema = z.object({
     audioOnly: z
       .boolean()
       .describe(
-        "True when information here is conveyed by sound alone, with no captions or transcript."
+        "True when information the student must RECEIVE here arrives by sound alone, with no captions or transcript. This is about listening, never about speaking: a step where the student records or presents aloud is producing sound, which belongs in `communication`, and must leave this false."
       ),
   }),
   communication: z
@@ -88,11 +88,61 @@ export const demandsSchema = z.object({
     ),
 });
 
+/**
+ * What a repair actually changes. Without this a repair is only a sentence, and
+ * applying it can only be modelled as "this step is fine now" — which is how a
+ * memory fix ends up silently clearing an unrelated time limit. Each flag maps
+ * to exactly one demand, so an applied repair moves that demand and no other.
+ */
+export const repairEffectsSchema = z.object({
+  keepsInfoVisible: z
+    .boolean()
+    .describe(
+      "True when the change keeps information this step produces on screen or on paper for the rest of the task, so the student no longer has to hold it in mind."
+    ),
+  reducesWorkingMemory: z
+    .boolean()
+    .describe("True when the change lowers how much the student must remember here."),
+  reducesFineMotor: z
+    .boolean()
+    .describe(
+      "True when the change offers a route that needs less pointer precision, such as a typed entry instead of a drag."
+    ),
+  removesTimePressure: z
+    .boolean()
+    .describe("True when the change removes or relaxes a clock running on this step."),
+  reducesReadingLoad: z
+    .boolean()
+    .describe(
+      "True when the change cuts how much text the student must process here, for example by splitting a dense paragraph into numbered steps."
+    ),
+  addsNonColorCue: z
+    .boolean()
+    .describe(
+      "True when the change adds a label, pattern, or text equivalent alongside information currently carried by color alone."
+    ),
+  addsCaptionOrTranscript: z
+    .boolean()
+    .describe(
+      "True when the change adds captions or a transcript to information currently carried by sound alone."
+    ),
+  addsResponseAlternative: z
+    .boolean()
+    .describe(
+      "True when the change lets the student respond in a different modality, so a single forced response mode is no longer the only route."
+    ),
+});
+
 export const repairSchema = z.object({
   suggestion: z
     .string()
     .describe(
       "A concrete change the educator could make to this step, phrased as revised instructions rather than advice."
+    ),
+  effects: repairEffectsSchema
+    .nullable()
+    .describe(
+      "Exactly which demands this change moves. Set only the flags the suggestion genuinely delivers: a repair that keeps results on screen does not also remove a time limit. Null only when the change fits none of these flags."
     ),
   barrierReduced: z
     .string()
@@ -139,6 +189,12 @@ export const stepSchema = z.object({
       "True when everything produced here remains on screen for the rest of the assignment. False when the student must record or memorize it because leaving this step makes it disappear."
     ),
   demands: demandsSchema,
+  estimatedMinutes: z
+    .number()
+    .nullable()
+    .describe(
+      "How many minutes this one step occupies because the assignment states or implies a duration for it — a twenty-minute video to watch, a three-minute answer to record, a fifty-minute lab period. Null when the step has no stated duration and takes only as long as the work itself."
+    ),
   evidence: z
     .string()
     .describe(
@@ -185,8 +241,8 @@ export const analysisSchema = z.object({
     .describe(
       "A deadline the student must finish work within, in minutes — for example a quiz timer or a session that closes. Null when no such limit exists. This is NOT the length of an artefact the student produces: a three-minute recording, a four-minute presentation, or a twenty-minute video to watch are durations, not limits, and must leave this null."
     ),
-  steps: z.array(stepSchema).describe(
-    "The complete sequence of actions a student performs, in order, from opening the assignment to submitting it."
+  steps: z.array(stepSchema).min(1).describe(
+    "The complete sequence of actions a student performs, in order, from opening the assignment to submitting it. Never empty: every assignment has at least one step."
   ),
   frictionMoments: z
     .array(frictionMomentSchema)
@@ -209,7 +265,10 @@ export const objectiveCandidateSchema = z.object({
 export const objectiveExtractionSchema = z.object({
   objectives: z
     .array(objectiveCandidateSchema)
-    .describe("Candidate objectives, most likely first, at most three."),
+    .min(1)
+    .describe(
+      "Candidate objectives, most likely first, at least one and at most three. When the assignment states no objective, infer one and mark its source 'inferred' rather than returning nothing."
+    ),
 });
 
 export const revisedAssignmentSchema = z.object({
@@ -241,6 +300,7 @@ export type RevisedAssignment = z.infer<typeof revisedAssignmentSchema>;
 
 export type Demands = z.infer<typeof demandsSchema>;
 export type Repair = z.infer<typeof repairSchema>;
+export type RepairEffects = z.infer<typeof repairEffectsSchema>;
 export type Step = z.infer<typeof stepSchema>;
 export type FrictionMoment = z.infer<typeof frictionMomentSchema>;
 export type Analysis = z.infer<typeof analysisSchema>;

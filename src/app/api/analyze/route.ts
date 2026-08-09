@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { MODEL, SYSTEM_PROMPT, getClient } from "@/lib/claude";
+import { clampAnalysis } from "@/lib/engine";
 import { verifyEvidence } from "@/lib/evidenceGuard";
 import { ANALYSIS_LIMIT, checkRateLimit } from "@/lib/rateLimit";
 import { analysisSchema } from "@/lib/schema";
@@ -62,7 +63,7 @@ ${lockedObjective}
 
 Decompose the assignment below into the sequence of actions a student performs, and judge every demand against that objective.
 
-Remember: evidence quotes must be copied character-for-character from the assignment; information dependencies (produces / consumes / producedInfoStaysVisible) drive the working-memory analysis; and any time limit stated anywhere in the assignment belongs in timeLimitMinutes.
+Remember: evidence quotes must be copied character-for-character from the assignment; information dependencies (produces / consumes / producedInfoStaysVisible) drive the working-memory analysis; any time limit stated anywhere in the assignment belongs in timeLimitMinutes, while a duration attached to a single step belongs in that step's estimatedMinutes; and every repair must use its "effects" object to state exactly which demands it moves, setting only the flags its own suggestion delivers.
 
 <assignment>
 ${assignmentText}
@@ -78,7 +79,7 @@ ${assignmentText}
       );
     }
 
-    const checked = verifyEvidence(response.parsed_output, assignmentText);
+    const checked = verifyEvidence(clampAnalysis(response.parsed_output), assignmentText);
     if (checked.discarded > 0) {
       console.warn(
         `evidence guard discarded ${checked.discarded} unverifiable quote(s): ${checked.discardedStepIds.join(", ")}`

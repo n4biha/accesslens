@@ -72,10 +72,18 @@ Group related steps into friction moments describing what the student experience
 
 Sensory barriers in particular need explicit textual grounding: flag sensory_color_only only when the assignment itself distinguishes things by colour, and sensory_audio_only only when it states or clearly implies that required audio has no captions or transcript.
 
+The two sensory flags describe what the student must **receive**, never what they produce. A step where the student records an answer, presents aloud, or is filmed is producing sound: that belongs in \`communication\`, and \`sensory.audioOnly\` stays false. Setting it there would report that a student who cannot hear is blocked by their own speech.
+
+## Duration
+
+When the assignment attaches a length to a single step — a twenty-minute video to watch, a three-minute answer to record, a fifty-minute lab period — put those minutes in that step's estimatedMinutes. This is separate from timeLimitMinutes, which is a deadline for the whole task. A step with no stated length leaves estimatedMinutes null; do not guess how long ordinary work takes.
+
 ## Word counts
 
 Estimate the words a student must read at each step, including linked readings the instructions name (a typical assigned article runs 1,000–2,000 words). These feed a reading-time calculation, so a rough but honest estimate is far better than zero.
 
 ## Repairs
 
-Where a demand is incidental, propose a repair phrased as revised instructions the educator could adopt, not as advice about accessibility. State plainly whether the locked objective is still assessed just as fully. Never propose removing something the objective requires.`;
+Where a demand is incidental, propose a repair phrased as revised instructions the educator could adopt, not as advice about accessibility. State plainly whether the locked objective is still assessed just as fully. Never propose removing something the objective requires.
+
+Every repair must also state, in \`effects\`, exactly which demands it moves. Set a flag only when your own suggestion delivers it. Keeping simulation results on screen sets keepsInfoVisible and reducesWorkingMemory — it does not remove a time limit, add captions, or change how the student responds, and claiming otherwise would tell the educator a barrier is fixed when nothing about it changed. A repair may legitimately set several flags when it genuinely does several things; the test is whether the educator, reading the suggestion alone, would agree each one follows from it.`;

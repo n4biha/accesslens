@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 
 import AccessibilityScore from "@/components/AccessibilityScore";
 import AppNav from "@/components/AppNav";
@@ -64,13 +64,23 @@ export default function Home() {
   const [objective, setObjective] = useState(BIOLOGY_SAMPLE.objectives[0].text);
   const [baseAnalysis, setBaseAnalysis] = useState<Analysis>(BIOLOGY_SAMPLE.analysis);
   const [steps, setSteps] = useState<Step[]>(BIOLOGY_SAMPLE.analysis.steps);
-  const [selectedFriction, setSelectedFriction] = useState<FrictionMoment>(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+  // Null whenever the analysis found nothing to review. An assignment with no
+  // friction is a success, not an edge case, so it must not be papered over
+  // with a fixture that belongs to a different assignment.
+  const [selectedFriction, setSelectedFriction] = useState<FrictionMoment | null>(
+    BIOLOGY_SAMPLE.analysis.frictionMoments[0] ?? null,
+  );
   const [condition, setCondition] = useState<ConditionId>("working_memory");
   const [appliedRepairIds, setAppliedRepairIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [revised, setRevised] = useState<RevisedAssignment | null>(null);
+  const [revised, setRevised] = useState<{ key: string; value: RevisedAssignment } | null>(null);
   const [visited, setVisited] = useState<ReadonlySet<WorkflowStage>>(new Set(["analyze"]));
   const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>("objective");
+
+  // Identifies the request currently in flight. A response that arrives after
+  // the educator has started another analysis is discarded rather than allowed
+  // to redirect them into results for text they have moved on from.
+  const requestId = useRef(0);
 
   const analysis = useMemo(
     () => ({ ...baseAnalysis, steps }),
@@ -96,11 +106,21 @@ export default function Home() {
   );
 
   const selectedStep = useMemo(() => {
+    if (!selectedFriction) return null;
     const matched = selectedFriction.stepIds
       .map((stepId) => steps.find((step) => step.id === stepId))
       .filter((step): step is Step => Boolean(step));
-    return matched.find((step) => step.repair !== null) ?? matched[0] ?? steps[0];
+    return matched.find((step) => step.repair !== null) ?? matched[0] ?? steps[0] ?? null;
   }, [selectedFriction, steps]);
+
+  // The revision is only valid for the inputs it was generated from. Keying it
+  // this way means changing a repair decision retires the old rewrite instead
+  // of leaving it to be exported beside a repair count it no longer matches.
+  const revisionKey = useMemo(
+    () => JSON.stringify([analyzedText, objective, [...appliedRepairIds].sort()]),
+    [analyzedText, objective, appliedRepairIds],
+  );
+  const currentRevision = revised?.key === revisionKey ? revised.value : null;
 
   useEffect(() => {
     if (stage === "intro") return;
@@ -128,6 +148,10 @@ export default function Home() {
     addRepair(stepId);
   }
 
+  const recordRevision = useCallback((key: string, value: RevisedAssignment) => {
+    setRevised({ key, value });
+  }, []);
+
   /** Single entry point for navigation so every arrival is recorded as visited. */
   const goToStage = useCallback((next: WorkflowStage) => {
     setStage(next);
@@ -139,10 +163,14 @@ export default function Home() {
   /** Reads the assignment and proposes a learning objective for the educator to lock. */
   async function submitAssignment() {
     const text = assignmentDraft;
+    const token = ++requestId.current;
     setError(null);
     setAppliedRepairIds([]);
     setRevised(null);
     setCondition("working_memory");
+    // A new assignment invalidates every result downstream, so the stages that
+    // showed them stop being reachable until this analysis produces its own.
+    setVisited(new Set(["analyze"]));
     setLoadingPhase("objective");
     goToStage("loading");
 
@@ -151,10 +179,12 @@ export default function Home() {
         extractObjectives(text),
         new Promise((resolve) => setTimeout(resolve, MIN_LOADING_MS)),
       ]);
+      if (token !== requestId.current) return;
       setAnalyzedText(text);
       setObjective(objectives[0]?.text ?? "");
       goToStage("goal");
     } catch (err) {
+      if (token !== requestId.current) return;
       setError(describeError(err));
       goToStage("analyze");
     }
@@ -162,6 +192,7 @@ export default function Home() {
 
   /** Locks the objective, then analyses the task against it. */
   async function lockAndAnalyze(lockedObjective: string) {
+    const token = ++requestId.current;
     setObjective(lockedObjective);
     setError(null);
     setLoadingPhase("analysis");
@@ -172,25 +203,37 @@ export default function Home() {
         analyzeAssignment(analyzedText, lockedObjective),
         new Promise((resolve) => setTimeout(resolve, MIN_LOADING_MS)),
       ]);
+      if (token !== requestId.current) return;
       setBaseAnalysis(result);
       setSteps(result.steps);
-      setSelectedFriction(result.frictionMoments[0] ?? BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+      setSelectedFriction(result.frictionMoments[0] ?? null);
       goToStage("journey");
     } catch (err) {
+      if (token !== requestId.current) return;
       setError(describeError(err));
       goToStage("goal");
     }
   }
 
   function exportSummary() {
-    if (!revised) return;
+    if (!currentRevision) return;
     downloadSummary(
-      summaryFilename(revised.title),
-      buildSummary(revised, objective, analysis, report, confidence.score)
+      summaryFilename(currentRevision.title),
+      // Measured against the repaired graph, matching the revised assignment
+      // the file carries and the after-score shown on the completion screen.
+      buildSummary(currentRevision, objective, {
+        analysis,
+        report,
+        scoreBefore: confidence.score,
+        repairedAnalysis,
+        repairedReport,
+        scoreAfter: repairedConfidence.score,
+      })
     );
   }
 
   const startOver = useCallback(() => {
+    requestId.current++;
     setAssignmentDraft(BIOLOGY_TEXT);
     setAnalyzedText(BIOLOGY_TEXT);
     setObjective(BIOLOGY_SAMPLE.objectives[0].text);
@@ -198,9 +241,10 @@ export default function Home() {
     setSteps(BIOLOGY_SAMPLE.analysis.steps);
     setAppliedRepairIds([]);
     setCondition("working_memory");
-    setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+    setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0] ?? null);
     setError(null);
     setRevised(null);
+    setVisited(new Set(["analyze"]));
     goToStage("analyze");
   }, [goToStage]);
 
@@ -249,17 +293,36 @@ export default function Home() {
               <JourneyScan analysis={analysis} report={report} />
               <section className="journey-bottom">
                 <AccessibilityScore {...confidence} />
-                <button
-                  type="button"
-                  className="button button--primary"
-                  onClick={() => { setSelectedFriction(analysis.frictionMoments[0]); goToStage("barrier"); }}
-                >
-                  Review friction <ArrowRight size={17} aria-hidden="true" />
-                </button>
+                {analysis.frictionMoments.length > 0 ? (
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={() => { setSelectedFriction(analysis.frictionMoments[0]); goToStage("barrier"); }}
+                  >
+                    Review friction <ArrowRight size={17} aria-hidden="true" />
+                  </button>
+                ) : (
+                  // Nothing to trace and nothing to repair. Skipping straight to
+                  // the constraint tests keeps the two screens that would
+                  // otherwise have to invent something to show out of the way.
+                  <div className="journey-clear">
+                    <p>
+                      <CheckCircle2 size={17} aria-hidden="true" />
+                      No friction moments found. Every step&rsquo;s demands trace back to the locked objective.
+                    </p>
+                    <button
+                      type="button"
+                      className="button button--primary"
+                      onClick={() => goToStage("constraint")}
+                    >
+                      Test access conditions <ArrowRight size={17} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
               </section>
             </>
           )}
-          {stage === "barrier" && (
+          {stage === "barrier" && selectedFriction && selectedStep && (
             <BarrierTrace
               assignmentText={analyzedText}
               step={selectedStep}
@@ -267,7 +330,7 @@ export default function Home() {
               citation={shortCitation(selectedFriction.barrierType)}
             />
           )}
-          {stage === "repair" && <RepairScreen steps={steps} onApply={addRepair} onKeep={keepCurrent} onCustomize={customizeRepair} />}
+          {stage === "repair" && <RepairScreen steps={steps} appliedRepairIds={appliedRepairIds} onApply={addRepair} onKeep={keepCurrent} onCustomize={customizeRepair} />}
           {stage === "constraint" && <ConstraintTest
               key={condition}
               analysis={analysis}
@@ -281,17 +344,21 @@ export default function Home() {
               steps={steps}
               appliedRepairIds={appliedRepairIds}
               assignmentText={analyzedText}
-              onRevised={setRevised}
+              revisionKey={revisionKey}
+              onRevised={recordRevision}
             />
           )}
           {stage === "complete" && (
             <CompleteScreen
               frictionCount={analysis.frictionMoments.length}
+              frictionResolved={
+                analysis.frictionMoments.length - repairedAnalysis.frictionMoments.length
+              }
               repairsApplied={appliedRepairIds.length}
               goalPreserved={goalPreserved}
               scoreBefore={confidence.score}
               scoreAfter={repairedConfidence.score}
-              canExport={revised !== null}
+              canExport={currentRevision !== null}
               onExport={exportSummary}
             />
           )}

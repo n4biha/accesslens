@@ -78,6 +78,15 @@ export interface TimingReport {
   actionMinutes: number;
   requiredMinutesMean: number;
   requiredMinutesConservative: number;
+  /**
+   * The part of the task the stated limit actually covers, and how long that
+   * part takes. A quiz timer does not run while the student watches a video
+   * assigned for the week before, so comparing the limit against the whole
+   * assignment would report an impossible deadline that does not exist.
+   */
+  limitedStepCount: number;
+  limitedMinutesMean: number;
+  limitedMinutesConservative: number;
   verdict: TimingVerdict;
   verdictConservative: TimingVerdict;
   /** Fraction of the limit consumed at the mean reading rate; null when untimed. */
@@ -220,26 +229,44 @@ function verdictFor(required: number, limit: number | null): TimingVerdict {
   return "comfortable";
 }
 
+function stepSeconds(step: Step): number {
+  // A step the assignment gives a duration to costs that duration: a
+  // twenty-minute video is twenty minutes of the student's time, not the
+  // thirty seconds a generic step is worth.
+  const stated = step.estimatedMinutes;
+  let seconds =
+    stated !== null && stated > 0
+      ? Math.max(stated * 60, BASE_SECONDS_PER_STEP)
+      : BASE_SECONDS_PER_STEP;
+  if (step.demands.fineMotor >= 2) seconds += PRECISION_STEP_EXTRA_SECONDS;
+  if (step.demands.communication !== "none") seconds += RESPONSE_STEP_EXTRA_SECONDS;
+  return seconds;
+}
+
+function cost(steps: Step[]): { words: number; minutes: number } {
+  return {
+    words: steps.reduce((sum, step) => sum + Math.max(0, step.demands.wordCount || 0), 0),
+    minutes: steps.reduce((sum, step) => sum + stepSeconds(step), 0) / 60,
+  };
+}
+
 export function analyzeTiming(analysis: Analysis): TimingReport {
   const { steps, timeLimitMinutes } = analysis;
 
-  const totalWords = steps.reduce(
-    (sum, step) => sum + Math.max(0, step.demands.wordCount || 0),
-    0
-  );
-
-  const actionSeconds = steps.reduce((sum, step) => {
-    let seconds = BASE_SECONDS_PER_STEP;
-    if (step.demands.fineMotor >= 2) seconds += PRECISION_STEP_EXTRA_SECONDS;
-    if (step.demands.communication !== "none") seconds += RESPONSE_STEP_EXTRA_SECONDS;
-    return sum + seconds;
-  }, 0);
-
-  const actionMinutes = actionSeconds / 60;
+  const whole = cost(steps);
+  const totalWords = whole.words;
+  const actionMinutes = whole.minutes;
   const readingMinutesMean = totalWords / MEAN_READING_WPM;
   const readingMinutesConservative = totalWords / CONSERVATIVE_READING_WPM;
   const requiredMinutesMean = readingMinutesMean + actionMinutes;
   const requiredMinutesConservative = readingMinutesConservative + actionMinutes;
+
+  // The limit is judged against the steps that are actually under it. When the
+  // graph marks no step as timed, the limit is taken to cover the whole task.
+  const timedSteps = steps.filter((step) => step.demands.timePressure >= 2);
+  const limited = cost(timedSteps.length > 0 ? timedSteps : steps);
+  const limitedMean = limited.words / MEAN_READING_WPM + limited.minutes;
+  const limitedConservative = limited.words / CONSERVATIVE_READING_WPM + limited.minutes;
 
   return {
     timeLimitMinutes,
@@ -249,12 +276,13 @@ export function analyzeTiming(analysis: Analysis): TimingReport {
     actionMinutes: round(actionMinutes),
     requiredMinutesMean: round(requiredMinutesMean),
     requiredMinutesConservative: round(requiredMinutesConservative),
-    verdict: verdictFor(requiredMinutesMean, timeLimitMinutes),
-    verdictConservative: verdictFor(requiredMinutesConservative, timeLimitMinutes),
+    limitedStepCount: timedSteps.length > 0 ? timedSteps.length : steps.length,
+    limitedMinutesMean: round(limitedMean),
+    limitedMinutesConservative: round(limitedConservative),
+    verdict: verdictFor(limitedMean, timeLimitMinutes),
+    verdictConservative: verdictFor(limitedConservative, timeLimitMinutes),
     utilizationMean:
-      timeLimitMinutes === null
-        ? null
-        : round(requiredMinutesMean / timeLimitMinutes, 2),
+      timeLimitMinutes === null ? null : round(limitedMean / timeLimitMinutes, 2),
   };
 }
 
@@ -372,6 +400,45 @@ export function scoreAccessibility(
 
   const total = breakdown.reduce((sum, item) => sum + item.points, 0);
   return { score: Math.max(0, Math.min(100, 100 + total)), breakdown };
+}
+
+/**
+ * Brings a model-supplied graph inside the ranges the schema describes.
+ *
+ * The demand levels are documented as 0-3 and every threshold in this file and
+ * in the constraint tests assumes it. Rejecting an out-of-range value would
+ * throw away an entire analysis over one integer, so the value is clamped and
+ * the rest of the work survives — the same reasoning that blanks an unverified
+ * quote rather than discarding the step it came from.
+ */
+export function clampAnalysis(analysis: Analysis): Analysis {
+  const level = (value: number) =>
+    Number.isFinite(value) ? Math.min(3, Math.max(0, Math.round(value))) : 0;
+  const nonNegative = (value: number) =>
+    Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+
+  return {
+    ...analysis,
+    timeLimitMinutes:
+      analysis.timeLimitMinutes !== null && analysis.timeLimitMinutes > 0
+        ? analysis.timeLimitMinutes
+        : null,
+    steps: analysis.steps.map((step) => ({
+      ...step,
+      estimatedMinutes:
+        step.estimatedMinutes !== null && step.estimatedMinutes > 0
+          ? step.estimatedMinutes
+          : null,
+      demands: {
+        ...step.demands,
+        workingMemory: level(step.demands.workingMemory),
+        fineMotor: level(step.demands.fineMotor),
+        timePressure: level(step.demands.timePressure),
+        readingLoad: level(step.demands.readingLoad),
+        wordCount: nonNegative(step.demands.wordCount),
+      },
+    })),
+  };
 }
 
 export function runEngine(analysis: Analysis, assignmentText: string): EngineReport {

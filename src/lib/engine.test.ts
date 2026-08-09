@@ -6,6 +6,7 @@ import {
   analyzeSwitching,
   analyzeText,
   analyzeTiming,
+  clampAnalysis,
   runEngine,
   scoreAccessibility,
   WORKING_MEMORY_CAPACITY,
@@ -28,6 +29,7 @@ function step(overrides: Partial<Step> & Pick<Step, "id" | "environment">): Step
     produces: [],
     consumes: [],
     producedInfoStaysVisible: true,
+    estimatedMinutes: null,
     evidence: "",
     goalRelevance: "unknown",
     relevanceReason: "",
@@ -210,4 +212,107 @@ test("score never falls below zero", () => {
   };
   const report = runEngine(brutal, "text");
   assert.equal(scoreAccessibility(report, brutal).score, 0);
+});
+
+test("a stated step duration is counted as the time it takes", () => {
+  const withVideo: Analysis = {
+    timeLimitMinutes: 30,
+    frictionMoments: [],
+    steps: [
+      step({ id: "a", environment: "Canvas" }),
+      step({ id: "b", environment: "Panopto", estimatedMinutes: 20 }),
+    ],
+  };
+
+  // Two generic steps would cost a minute between them; the twenty-minute
+  // video costs twenty. Without this a required lecture recording was worth
+  // thirty seconds, and any timing verdict built on it was meaningless.
+  assert.equal(analyzeTiming(withVideo).actionMinutes, 20.5);
+
+  const withoutDuration = analyzeTiming({
+    ...withVideo,
+    steps: withVideo.steps.map((s) => ({ ...s, estimatedMinutes: null })),
+  });
+  assert.equal(withoutDuration.actionMinutes, 1);
+});
+
+test("a stated duration shorter than a generic step does not shrink it", () => {
+  const brief: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [],
+    steps: [step({ id: "a", environment: "Canvas", estimatedMinutes: 0.1 })],
+  };
+  assert.equal(analyzeTiming(brief).actionMinutes, 0.5);
+});
+
+test("demand levels outside the documented range are clamped, not rejected", () => {
+  const wild: Analysis = {
+    timeLimitMinutes: -4,
+    frictionMoments: [],
+    steps: [
+      step({
+        id: "a",
+        environment: "Canvas",
+        estimatedMinutes: -2,
+        demands: {
+          workingMemory: 9,
+          fineMotor: -1,
+          timePressure: 2.4,
+          readingLoad: 3,
+          contextSwitch: false,
+          sensory: { colorOnly: false, audioOnly: false },
+          communication: "none",
+          wordCount: -50,
+        },
+      }),
+    ],
+  };
+
+  const { steps, timeLimitMinutes } = clampAnalysis(wild);
+  assert.equal(steps[0].demands.workingMemory, 3);
+  assert.equal(steps[0].demands.fineMotor, 0);
+  assert.equal(steps[0].demands.timePressure, 2);
+  assert.equal(steps[0].demands.wordCount, 0);
+  assert.equal(steps[0].estimatedMinutes, null);
+  assert.equal(timeLimitMinutes, null);
+
+  // The step itself survives: one bad integer must not cost the whole analysis.
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].id, "a");
+});
+
+test("a limit is judged against the steps it actually covers", () => {
+  // A twelve-minute pre-lab video plus a fifteen-minute quiz. The video is not
+  // taken during the quiz, so charging it against the quiz timer would report
+  // a deadline that is impossible only because two unrelated things were added
+  // together.
+  const preLabVideo: Analysis = {
+    timeLimitMinutes: 15,
+    frictionMoments: [],
+    steps: [
+      step({ id: "video", environment: "Canvas", estimatedMinutes: 12 }),
+      step({
+        id: "quiz",
+        environment: "Canvas",
+        demands: { timePressure: 3, communication: "typed", wordCount: 250 } as Step["demands"],
+      }),
+    ],
+  };
+
+  const timing = analyzeTiming(preLabVideo);
+  assert.equal(timing.limitedStepCount, 1);
+  assert.equal(timing.requiredMinutesMean, 14.6, "the whole task still counts the video");
+  assert.equal(timing.limitedMinutesMean, 2.6, "the limit is judged on the quiz alone");
+  assert.equal(timing.verdict, "comfortable");
+});
+
+test("a limit with no step marked as timed still covers the whole task", () => {
+  const untargeted: Analysis = {
+    timeLimitMinutes: 1,
+    frictionMoments: [],
+    steps: [step({ id: "a", environment: "Canvas", estimatedMinutes: 20 })],
+  };
+  const timing = analyzeTiming(untargeted);
+  assert.equal(timing.limitedStepCount, 1);
+  assert.equal(timing.verdict, "infeasible");
 });

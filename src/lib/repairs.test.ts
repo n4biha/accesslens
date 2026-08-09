@@ -3,19 +3,39 @@ import assert from "node:assert/strict";
 
 import { runEngine, scoreAccessibility } from "./engine";
 import { applyRepairs, outstandingRepairs } from "./repairs";
-import type { Analysis, Step } from "./schema";
+import type { Analysis, FrictionMoment, RepairEffects, Step } from "./schema";
 
-function step(o: Partial<Step> & Pick<Step, "id" | "environment">): Step {
+const NO_EFFECT: RepairEffects = {
+  keepsInfoVisible: false,
+  reducesWorkingMemory: false,
+  reducesFineMotor: false,
+  removesTimePressure: false,
+  reducesReadingLoad: false,
+  addsNonColorCue: false,
+  addsCaptionOrTranscript: false,
+  addsResponseAlternative: false,
+};
+
+function effects(partial: Partial<RepairEffects>): RepairEffects {
+  return { ...NO_EFFECT, ...partial };
+}
+
+function step(
+  o: Partial<Step> & Pick<Step, "id" | "environment">,
+  repairEffects: Partial<RepairEffects> | null = { keepsInfoVisible: true, reducesWorkingMemory: true },
+): Step {
   return {
     action: "does something",
     produces: [],
     consumes: [],
     producedInfoStaysVisible: true,
+    estimatedMinutes: null,
     evidence: "",
     goalRelevance: "incidental",
     relevanceReason: "",
     repair: {
       suggestion: "keep it visible",
+      effects: repairEffects === null ? null : effects(repairEffects),
       barrierReduced: "working memory",
       rigorPreserved: true,
       rigorNote: "same reasoning",
@@ -51,12 +71,15 @@ const analysis: Analysis = {
       demands: { contextSwitch: true, fineMotor: 3, workingMemory: 3 } as Step["demands"],
     }),
     step({ id: "s3", environment: "Canvas", demands: { contextSwitch: true } as Step["demands"] }),
-    step({
-      id: "s4",
-      environment: "Docs",
-      consumes: VALUES,
-      demands: { contextSwitch: true, communication: "spoken", timePressure: 3 } as Step["demands"],
-    }),
+    step(
+      {
+        id: "s4",
+        environment: "Docs",
+        consumes: VALUES,
+        demands: { contextSwitch: true, communication: "spoken", timePressure: 3 } as Step["demands"],
+      },
+      { removesTimePressure: true, addsResponseAlternative: true },
+    ),
   ],
 };
 
@@ -64,12 +87,96 @@ test("an unapplied repair changes nothing", () => {
   assert.deepEqual(applyRepairs(analysis, []), analysis);
 });
 
-test("applying a repair keeps the produced information visible", () => {
-  const repaired = applyRepairs(analysis, ["s2"]);
-  const s2 = repaired.steps.find((s) => s.id === "s2")!;
-  assert.equal(s2.producedInfoStaysVisible, true);
-  assert.equal(s2.demands.workingMemory, 1);
-  assert.equal(s2.demands.fineMotor, 1);
+test("a repair moves only the demands it states", () => {
+  // s2 carries a memory barrier and a separate motor barrier. Accepting the
+  // memory repair must not silently resolve the motor one: the educator agreed
+  // to keep values on screen, not to add an alternative to dragging.
+  const s2 = applyRepairs(analysis, ["s2"]).steps.find((s) => s.id === "s2")!;
+
+  assert.equal(s2.producedInfoStaysVisible, true, "the stated effect applies");
+  assert.equal(s2.demands.workingMemory, 1, "the stated effect applies");
+  assert.equal(s2.demands.fineMotor, 3, "an unaddressed demand is left alone");
+});
+
+test("a timing repair does not clear an unrelated sensory or memory demand", () => {
+  const source: Analysis = {
+    ...analysis,
+    steps: [
+      step(
+        {
+          id: "only",
+          environment: "Canvas",
+          demands: {
+            timePressure: 3,
+            workingMemory: 3,
+            sensory: { colorOnly: true, audioOnly: true },
+            communication: "spoken",
+          } as Step["demands"],
+        },
+        { removesTimePressure: true },
+      ),
+    ],
+  };
+
+  const repaired = applyRepairs(source, ["only"]).steps[0];
+  assert.equal(repaired.demands.timePressure, 0);
+  assert.equal(repaired.demands.workingMemory, 3);
+  assert.equal(repaired.demands.sensory.colorOnly, true);
+  assert.equal(repaired.demands.sensory.audioOnly, true);
+  assert.equal(repaired.demands.communication, "spoken");
+});
+
+test("a repair with no stated effects falls back to the barrier that flagged it", () => {
+  const source: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [
+      {
+        id: "f1",
+        title: "Dragging is the only route",
+        stepIds: ["only"],
+        severity: "high",
+        barrierType: "fine_motor",
+        explanation: "",
+      },
+    ],
+    steps: [
+      step(
+        {
+          id: "only",
+          environment: "PhET",
+          demands: { fineMotor: 3, workingMemory: 3 } as Step["demands"],
+        },
+        null,
+      ),
+    ],
+  };
+
+  const repaired = applyRepairs(source, ["only"]).steps[0];
+  assert.equal(repaired.demands.fineMotor, 1, "derived from the friction moment");
+  assert.equal(repaired.demands.workingMemory, 3, "still not a blanket reset");
+});
+
+test("a repair with neither effects nor a friction moment falls back to its own wording", () => {
+  const source: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [],
+    steps: [
+      {
+        ...step({ id: "only", environment: "Canvas", demands: { timePressure: 3, fineMotor: 3 } as Step["demands"] }, null),
+        repair: {
+          suggestion: "Remove the countdown so students can work at their own pace.",
+          effects: null,
+          barrierReduced: "Processing-speed pressure",
+          rigorPreserved: true,
+          rigorNote: "",
+        },
+      },
+    ],
+  };
+
+  const repaired = applyRepairs(source, ["only"]).steps[0];
+  assert.equal(repaired.demands.timePressure, 0);
+  assert.equal(repaired.demands.fineMotor, 3);
 });
 
 test("a step with no repair is untouched even if its id is passed", () => {
@@ -116,22 +223,96 @@ test("constraint conditions flip from fail to pass", () => {
   assert.equal(analysis.steps.filter(failsMotor).length, 1);
   assert.equal(analysis.steps.filter(failsSpoken).length, 1);
 
+  // s4's repair states addsResponseAlternative, so the spoken requirement goes.
+  // s2's states nothing about motor precision, so dragging is still required —
+  // the screen reports that honestly rather than showing a blanket pass.
   const repaired = applyRepairs(analysis, ["s2", "s4"]);
-  assert.equal(repaired.steps.filter(failsMotor).length, 0);
   assert.equal(repaired.steps.filter(failsSpoken).length, 0);
+  assert.equal(repaired.steps.filter(failsMotor).length, 1);
 });
 
-test("the time limit only clears when every timed step is repaired", () => {
+test("the time limit only clears when every timed step is repaired for timing", () => {
   const twoTimed: Analysis = {
     ...analysis,
     steps: [
       ...analysis.steps,
-      step({ id: "s5", environment: "Canvas", demands: { timePressure: 3 } as Step["demands"] }),
+      step(
+        { id: "s5", environment: "Canvas", demands: { timePressure: 3 } as Step["demands"] },
+        { removesTimePressure: true },
+      ),
     ],
   };
 
   assert.equal(applyRepairs(twoTimed, ["s4"]).timeLimitMinutes, 5, "one of two repaired");
   assert.equal(applyRepairs(twoTimed, ["s4", "s5"]).timeLimitMinutes, null, "both repaired");
+});
+
+test("a repair that ignores timing does not clear the time limit", () => {
+  const source: Analysis = {
+    ...analysis,
+    steps: [
+      step(
+        { id: "only", environment: "Canvas", demands: { timePressure: 3 } as Step["demands"] },
+        { keepsInfoVisible: true },
+      ),
+    ],
+  };
+  assert.equal(applyRepairs(source, ["only"]).timeLimitMinutes, 5);
+});
+
+const moment = (o: Partial<FrictionMoment> & Pick<FrictionMoment, "id" | "barrierType" | "stepIds">): FrictionMoment => ({
+  title: "",
+  severity: "high",
+  explanation: "",
+  ...o,
+});
+
+test("a friction moment clears once no step it spans still shows its barrier", () => {
+  const source: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [
+      moment({ id: "f1", barrierType: "fine_motor", stepIds: ["a", "b"] }),
+      moment({ id: "f2", barrierType: "time_pressure", stepIds: ["b"], severity: "medium" }),
+    ],
+    steps: [
+      step({ id: "a", environment: "PhET", demands: { fineMotor: 3 } as Step["demands"] }, { reducesFineMotor: true }),
+      step(
+        { id: "b", environment: "PhET", demands: { fineMotor: 3, timePressure: 3 } as Step["demands"] },
+        { reducesFineMotor: true },
+      ),
+    ],
+  };
+
+  assert.equal(applyRepairs(source, ["a"]).frictionMoments.length, 2, "step b still drags");
+  const both = applyRepairs(source, ["a", "b"]);
+  assert.deepEqual(
+    both.frictionMoments.map((f) => f.id),
+    ["f2"],
+    "motor friction clears; the untouched timing friction stays",
+  );
+});
+
+test("resolved friction stops being deducted, unresolved friction keeps counting", () => {
+  const source: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [moment({ id: "f1", barrierType: "fine_motor", stepIds: ["a"] })],
+    steps: [
+      step({ id: "a", environment: "PhET", demands: { fineMotor: 3 } as Step["demands"] }, { reducesFineMotor: true }),
+    ],
+  };
+
+  assert.equal(scoreOf(source), 94, "-4 for one high-severity moment, -2 for the open repair");
+  assert.equal(scoreOf(applyRepairs(source, ["a"])), 100);
+});
+
+test("a barrier the schema cannot measure is never reported as resolved", () => {
+  const source: Analysis = {
+    timeLimitMinutes: null,
+    frictionMoments: [moment({ id: "f1", barrierType: "navigation_ambiguity", stepIds: ["a"] })],
+    steps: [step({ id: "a", environment: "Canvas" }, {})],
+  };
+
+  assert.equal(applyRepairs(source, ["a"]).frictionMoments.length, 1);
 });
 
 test("outstanding repairs counts only undecided steps", () => {

@@ -28,6 +28,7 @@ import DemandChips, { chipsForDemands } from "@/components/DemandChips";
 import { useWorkflow, type ConditionId } from "@/components/WorkflowContext";
 import { generatePreview } from "@/lib/analysisSource";
 import type { EngineReport } from "@/lib/engine";
+import { locateEvidence } from "@/lib/evidenceGuard";
 import type { Analysis, FrictionMoment, GoalRelevance, RevisedAssignment, Step } from "@/lib/schema";
 
 function ScreenHeading({
@@ -536,13 +537,16 @@ export interface BarrierTraceProps {
 }
 
 function HighlightedEvidence({ assignmentText, evidence }: { assignmentText: string; evidence: string }) {
-  const index = assignmentText.indexOf(evidence);
-  if (index < 0) return <p className="assignment-copy">{assignmentText}</p>;
+  // The same whitespace-tolerant match the evidence guard uses to verify the
+  // quote. An exact indexOf would fail on a quote that differs only in line
+  // wrapping, so a verified quote could pass the check and still not highlight.
+  const span = locateEvidence(assignmentText, evidence);
+  if (!span) return <p className="assignment-copy">{assignmentText}</p>;
   return (
     <p className="assignment-copy">
-      {assignmentText.slice(0, index)}
-      <mark>{assignmentText.slice(index, index + evidence.length)}</mark>
-      {assignmentText.slice(index + evidence.length)}
+      {assignmentText.slice(0, span.start)}
+      <mark>{assignmentText.slice(span.start, span.end)}</mark>
+      {assignmentText.slice(span.end)}
     </p>
   );
 }
@@ -587,15 +591,20 @@ export function BarrierTrace({ assignmentText, step, friction, citation }: Barri
 
 export interface RepairScreenProps {
   steps: Step[];
+  /** Repairs already accepted elsewhere — the Barrier Trace has its own Apply
+   *  button, and arriving here to be told nothing was applied would be wrong. */
+  appliedRepairIds: string[];
   onApply: (stepId: string) => void;
   onKeep: (stepId: string) => void;
   onCustomize: (stepId: string, suggestion: string) => void;
 }
 
-export function RepairScreen({ steps, onApply, onKeep, onCustomize }: RepairScreenProps) {
+export function RepairScreen({ steps, appliedRepairIds, onApply, onKeep, onCustomize }: RepairScreenProps) {
   const { goTo } = useWorkflow();
   const repairSteps = steps.filter((step) => step.repair !== null);
-  const [decisions, setDecisions] = useState<Record<string, "apply" | "keep" | "custom">>({});
+  const [decisions, setDecisions] = useState<Record<string, "apply" | "keep" | "custom">>(
+    () => Object.fromEntries(appliedRepairIds.map((id) => [id, "apply" as const])),
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -676,17 +685,41 @@ interface ConditionDefinition {
   label: string;
   icon: typeof CircleGauge;
   fails: (step: Step) => boolean;
+  /** Set when the task graph carries nothing that answers this condition. The
+   *  screen then says so rather than reporting a result it cannot support. */
+  unavailable?: boolean;
+  /** Shown in place of results, naming what is missing. */
+  unavailableReason?: string;
 }
 
 export const CONDITIONS: ConditionDefinition[] = [
   { id: "working_memory", label: "Reduced working-memory dependency", icon: CircleGauge, fails: (step) => step.demands.workingMemory >= 2 },
-  { id: "keyboard_only", label: "Keyboard-only", icon: Keyboard, fails: (step) => step.demands.fineMotor >= 2 },
+  // Whether a step has a keyboard route is a property of the software, and
+  // nothing in the task graph records it. Motor difficulty is a different
+  // question, so reusing that answer here would be a guess wearing a label.
+  {
+    id: "keyboard_only",
+    label: "Keyboard-only",
+    icon: Keyboard,
+    fails: () => false,
+    unavailable: true,
+    unavailableReason:
+      "Whether each step can be completed without a mouse depends on the software behind it, which the assignment text does not describe. Motor precision is measured separately under “Limited motor precision”.",
+  },
   { id: "fine_motor", label: "Limited motor precision", icon: MousePointer2, fails: (step) => step.demands.fineMotor >= 2 },
   { id: "no_spoken", label: "No spoken response", icon: Mic, fails: (step) => step.demands.communication === "spoken" },
   { id: "no_audio", label: "No audio", icon: Volume2, fails: (step) => step.demands.sensory.audioOnly },
   { id: "no_color", label: "No color information", icon: Sparkles, fails: (step) => step.demands.sensory.colorOnly },
   { id: "processing_time", label: "Additional processing time", icon: Clock3, fails: (step) => step.demands.timePressure >= 2 },
-  { id: "reduced_motion", label: "Reduced motion", icon: RotateCcw, fails: () => false },
+  {
+    id: "reduced_motion",
+    label: "Reduced motion",
+    icon: RotateCcw,
+    fails: () => false,
+    unavailable: true,
+    unavailableReason:
+      "The demand schema does not describe motion or animation, so AccessLens will not invent a result.",
+  },
 ];
 
 export interface ConstraintTestProps {
@@ -700,7 +733,7 @@ export interface ConstraintTestProps {
 export function ConstraintTest({ analysis, repairedAnalysis, report, condition }: ConstraintTestProps) {
   const { goTo, selectCondition } = useWorkflow();
   const selected = CONDITIONS.find((item) => item.id === condition) ?? CONDITIONS[0];
-  const unavailable = selected.id === "reduced_motion";
+  const unavailable = selected.unavailable === true;
   const [visibleCount, setVisibleCount] = useState(0);
   const failedSteps = analysis.steps.filter(selected.fails);
 
@@ -740,7 +773,7 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, condition }
             const Icon = item.icon;
             return (
               <button key={item.id} type="button" onClick={() => selectCondition(item.id)} className={item.id === selected.id ? "is-selected" : ""} aria-pressed={item.id === selected.id}>
-                <Icon size={16} aria-hidden="true" /><span>{item.label}</span>{item.id === "reduced_motion" && <small>Data unavailable</small>}
+                <Icon size={16} aria-hidden="true" /><span>{item.label}</span>{item.unavailable && <small>Data unavailable</small>}
               </button>
             );
           })}
@@ -758,7 +791,7 @@ export function ConstraintTest({ analysis, repairedAnalysis, report, condition }
             )}
           </div>
           {unavailable ? (
-            <div className="unavailable-state"><RotateCcw size={24} aria-hidden="true" /><h3>Not represented in task data</h3><p>The current demand schema does not describe motion dependencies, so AccessLens will not invent a result.</p></div>
+            <div className="unavailable-state"><selected.icon size={24} aria-hidden="true" /><h3>Not represented in task data</h3><p>{selected.unavailableReason}</p></div>
           ) : (
             <ol className="test-steps">
               {analysis.steps.map((step, index) => {
@@ -816,7 +849,10 @@ export interface StudentPreviewProps {
   steps: Step[];
   appliedRepairIds: string[];
   assignmentText: string;
-  onRevised: (revised: RevisedAssignment) => void;
+  /** Identifies the exact inputs this revision belongs to, so a rewrite left over
+   *  from a different set of accepted repairs is never shown or exported. */
+  revisionKey: string;
+  onRevised: (revisionKey: string, revised: RevisedAssignment) => void;
 }
 
 interface AccessTool {
@@ -836,11 +872,16 @@ const ACCESS_TOOLS: AccessTool[] = [
   { id: "highlight", label: "Highlight current step", hint: "Dim everything else", live: false },
 ];
 
-export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText, onRevised }: StudentPreviewProps) {
+export function StudentPreview({ objective, steps, appliedRepairIds, assignmentText, revisionKey, onRevised }: StudentPreviewProps) {
   const { goTo } = useWorkflow();
   const [tools, setTools] = useState<Record<string, boolean>>({ spacing: false, declutter: false, readAloud: false });
-  const [revised, setRevised] = useState<RevisedAssignment | null>(null);
-  const [message, setMessage] = useState("");
+  // Held against the inputs it was generated from. Changing a repair decision
+  // therefore retires the old rewrite instead of leaving it on screen beside a
+  // repair list it no longer matches.
+  const [result, setResult] = useState<{ key: string; value: RevisedAssignment } | null>(null);
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  const revised = result?.key === revisionKey ? result.value : null;
+  const message = failure?.key === revisionKey ? failure.message : "";
 
   const accepted = useMemo(
     () =>
@@ -858,17 +899,20 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
     if (accepted.length === 0) return;
     let cancelled = false;
     generatePreview(assignmentText, objective, accepted)
-      .then((result) => {
+      .then((value) => {
         if (cancelled) return;
-        setRevised(result);
-        onRevised(result);
+        setResult({ key: revisionKey, value });
+        onRevised(revisionKey, value);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setMessage(error instanceof Error ? error.message : "Could not rewrite the assignment.");
+        setFailure({
+          key: revisionKey,
+          message: error instanceof Error ? error.message : "Could not rewrite the assignment.",
+        });
       });
     return () => { cancelled = true; };
-  }, [assignmentText, objective, accepted, onRevised]);
+  }, [assignmentText, objective, accepted, revisionKey, onRevised]);
 
   const loading = accepted.length > 0 && revised === null && message === "";
 
@@ -977,13 +1021,23 @@ export function StudentPreview({ objective, steps, appliedRepairIds, assignmentT
           </div>
         </aside>
       </div>
-      <div className="screen-footer-actions"><button type="button" className="button button--secondary" onClick={() => goTo("repair")}><ArrowLeft size={16} aria-hidden="true" /> Back to repairs</button><ArrowButton onClick={() => goTo("complete")}>Finish analysis</ArrowButton></div>
+      <div className="screen-footer-actions">
+        <button type="button" className="button button--secondary" onClick={() => goTo("repair")}><ArrowLeft size={16} aria-hidden="true" /> Back to repairs</button>
+        {/* Leaving mid-rewrite abandons the request, and the export would then
+            have nothing to carry, so the step is held open until it lands. */}
+        <ArrowButton onClick={() => goTo("complete")} disabled={loading}>
+          {loading ? "Waiting for the rewrite…" : "Finish analysis"}
+        </ArrowButton>
+      </div>
     </main>
   );
 }
 
 export interface CompleteScreenProps {
   frictionCount: number;
+  /** How many of those no longer appear once the accepted repairs are applied,
+   *  recomputed from the repaired graph rather than assumed from the count. */
+  frictionResolved: number;
   repairsApplied: number;
   goalPreserved: boolean;
   onExport: () => void;
@@ -992,17 +1046,21 @@ export interface CompleteScreenProps {
   scoreAfter: number;
 }
 
-export function CompleteScreen({ frictionCount, repairsApplied, goalPreserved, onExport, canExport, scoreBefore, scoreAfter }: CompleteScreenProps) {
+export function CompleteScreen({ frictionCount, frictionResolved, repairsApplied, goalPreserved, onExport, canExport, scoreBefore, scoreAfter }: CompleteScreenProps) {
   const { startOver } = useWorkflow();
   return (
     <main className="complete-screen">
       <div className="complete-mark" aria-hidden="true"><span /><span /><span /></div>
       <p className="eyebrow">Analysis complete</p>
       <h1 data-screen-heading tabIndex={-1}>Your task is ready.</h1>
-      <p className="complete-intro">AccessLens addressed the detected accessibility friction while preserving the learning goal.</p>
+      <p className="complete-intro">
+        {frictionResolved === frictionCount
+          ? "Every friction moment AccessLens detected is resolved in the revised task, and the learning goal is unchanged."
+          : `The repairs you accepted were applied and the task was measured again. ${frictionCount - frictionResolved} friction ${frictionCount - frictionResolved === 1 ? "moment is" : "moments are"} still present, because no accepted repair addresses ${frictionCount - frictionResolved === 1 ? "it" : "them"}.`}
+      </p>
       <div className="completion-facts">
         <p><CheckCircle2 size={18} aria-hidden="true" /><span>Learning goal {goalPreserved ? "preserved" : "needs review"}</span></p>
-        <p><span>{frictionCount}</span><small>friction moments reviewed</small></p>
+        <p><span>{frictionResolved}<em> / </em>{frictionCount}</span><small>friction moments resolved</small></p>
         <p><span>{repairsApplied}</span><small>repairs applied</small></p>
         {scoreAfter > scoreBefore && (
           <p className="complete-delta">

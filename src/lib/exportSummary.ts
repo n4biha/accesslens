@@ -1,18 +1,31 @@
 import type { EngineReport } from "./engine";
 import type { Analysis, RevisedAssignment } from "./schema";
 
+export interface SummaryMeasurements {
+  analysis: Analysis;
+  report: EngineReport;
+  scoreBefore: number;
+  /** The same graph with the accepted repairs applied. The file carries the
+   *  revised assignment, so it has to carry the revised assignment's numbers
+   *  too — reporting the original's measurements beside the rewritten text
+   *  would describe a task the educator is no longer setting. */
+  repairedAnalysis: Analysis;
+  repairedReport: EngineReport;
+  scoreAfter: number;
+}
+
 /**
  * Builds the file an educator actually takes away: the revised assignment they
  * can paste straight into their LMS, followed by the record of what changed and
- * the measurements behind it.
+ * the measurements behind it, before and after.
  */
 export function buildSummary(
   revised: RevisedAssignment,
   objective: string,
-  analysis: Analysis,
-  report: EngineReport,
-  score: number
+  measurements: SummaryMeasurements
 ): string {
+  const { analysis, report, scoreBefore, repairedAnalysis, repairedReport, scoreAfter } =
+    measurements;
   const lines: string[] = [];
 
   lines.push(`# ${revised.title}`, "");
@@ -33,34 +46,56 @@ export function buildSummary(
     }
   }
 
-  lines.push("## Measurements before repair", "");
-  lines.push(`- Task accessibility confidence: ${score}/100`);
-  lines.push(
-    `- Peak working-memory load: ${report.memory.peakLoad} item(s) held at once (capacity is about ${report.memory.capacity} chunks, Cowan 2001)`
-  );
-  const decay = report.memory.carried.filter((item) => item.decayRisk).length;
-  if (decay > 0) {
-    lines.push(`- ${decay} value(s) had to survive an environment change unaided`);
+  const decayCount = (source: EngineReport) =>
+    source.memory.carried.filter((item) => item.decayRisk).length;
+  const timing = (source: EngineReport) =>
+    source.timing.timeLimitMinutes === null
+      ? "no limit imposed"
+      : `the ${source.timing.limitedStepCount} step(s) under the clock take about ${source.timing.limitedMinutesMean} minutes against a ${source.timing.timeLimitMinutes}-minute limit (${source.timing.verdict}); a slower reader needs about ${source.timing.limitedMinutesConservative} minutes. The whole task takes about ${source.timing.requiredMinutesMean} minutes`;
+
+  const rows: Array<[string, string, string]> = [
+    ["Task accessibility confidence", `${scoreBefore}/100`, `${scoreAfter}/100`],
+    [
+      `Peak working-memory load (capacity is about ${report.memory.capacity} chunks, Cowan 2001)`,
+      `${report.memory.peakLoad} item(s)`,
+      `${repairedReport.memory.peakLoad} item(s)`,
+    ],
+    [
+      "Values carried across an environment change unaided",
+      `${decayCount(report)}`,
+      `${decayCount(repairedReport)}`,
+    ],
+    [
+      "Environment switches",
+      `${report.switching.transitions} across ${report.switching.uniqueEnvironments.length} environments`,
+      `${repairedReport.switching.transitions} across ${repairedReport.switching.uniqueEnvironments.length} environments`,
+    ],
+    ["Timing", timing(report), timing(repairedReport)],
+    [
+      "Friction moments",
+      `${analysis.frictionMoments.length}`,
+      `${repairedAnalysis.frictionMoments.length}`,
+    ],
+  ];
+
+  lines.push("## Measurements", "");
+  lines.push("| | Original | Revised |", "| --- | --- | --- |");
+  for (const [label, before, after] of rows) {
+    lines.push(`| ${label} | ${before} | ${after} |`);
   }
-  lines.push(
-    `- Context switching: ${report.switching.transitions} transition(s) across ${report.switching.uniqueEnvironments.length} environments`
-  );
-  if (report.timing.timeLimitMinutes !== null) {
-    lines.push(
-      `- Timing: about ${report.timing.requiredMinutesMean} minutes of reading and actions against a ${report.timing.timeLimitMinutes}-minute limit (${report.timing.verdict}); a slower reader needs about ${report.timing.requiredMinutesConservative} minutes`
-    );
-  } else {
-    lines.push(`- Timing: no limit imposed`);
-  }
-  lines.push(
-    `- Instructions: grade ${report.text.fleschKincaidGrade} reading level, ${report.text.instructionDensity} instruction(s) in the densest paragraph`
-  );
-  lines.push("", `- Friction moments identified: ${analysis.frictionMoments.length}`);
   lines.push("");
+  lines.push(
+    `Instructions as originally written: grade ${report.text.fleschKincaidGrade} reading level, ${report.text.instructionDensity} instruction(s) in the densest paragraph.`,
+    ""
+  );
 
   lines.push("---", "");
   lines.push(
-    "Measurements are computed from the task structure, not generated. This reflects task-level accessibility friction, not legal compliance, and educator judgment remains part of every decision.",
+    "Measurements are computed from the task structure, not generated. The revised column reflects only the repairs accepted above, and each repair moves only the demands it states. This reflects task-level accessibility friction, not legal compliance, and educator judgment remains part of every decision.",
+    ""
+  );
+  lines.push(
+    "Note: step durations are counted only where the assignment states them, so a task whose length is implied rather than written may need more time than the figures above suggest.",
     ""
   );
   lines.push("Generated by AccessLens.");
