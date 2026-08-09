@@ -520,6 +520,9 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 
 /* Editorial lens introduction */
 .intro-screen--lens {
+  --intro-lens-x: 76.4%;
+  --intro-lens-y: 44.4%;
+  --intro-lens-size: max(96svh, 52vw);
   position: relative;
   min-height: 100svh;
   display: flex;
@@ -540,7 +543,7 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
   overflow: hidden;
   opacity: 0;
   transform: scale(1.075);
-  transform-origin: 76% 46%;
+  transform-origin: var(--intro-lens-x) var(--intro-lens-y);
   transition:
     opacity 900ms ease,
     transform 3600ms cubic-bezier(0.22, 0.61, 0.21, 1);
@@ -569,32 +572,24 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 }
 
 .intro-artwork-layer--soft {
-  transform: translate3d(-0.35%, 0.2%, 0) scale(1.035);
-  filter: blur(3.5px) brightness(0.62) saturate(0.8) contrast(0.97);
-  transition: transform 3800ms cubic-bezier(0.22, 0.61, 0.21, 1);
+  filter: brightness(0.58) saturate(0.76) contrast(0.94);
 }
 
 .intro-artwork-layer--clear {
   z-index: 1;
-  transform: scale(1.012);
   filter: brightness(0.93) saturate(0.94) contrast(1.04);
-  -webkit-mask-image: radial-gradient(ellipse, #000 0 68%, rgba(0, 0, 0, 0.94) 76%, rgba(0, 0, 0, 0.42) 88%, transparent 100%);
-  -webkit-mask-position: 76% 46%;
+  -webkit-mask-image: radial-gradient(circle, #000 0 84%, rgba(0, 0, 0, 0.98) 88%, rgba(0, 0, 0, 0.42) 95%, transparent 100%);
+  -webkit-mask-position: var(--intro-lens-x) var(--intro-lens-y);
   -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: 6% 10%;
-  mask-image: radial-gradient(ellipse, #000 0 68%, rgba(0, 0, 0, 0.94) 76%, rgba(0, 0, 0, 0.42) 88%, transparent 100%);
-  mask-position: 76% 46%;
+  -webkit-mask-size: 6vmin 6vmin;
+  mask-image: radial-gradient(circle, #000 0 84%, rgba(0, 0, 0, 0.98) 88%, rgba(0, 0, 0, 0.42) 95%, transparent 100%);
+  mask-position: var(--intro-lens-x) var(--intro-lens-y);
   mask-repeat: no-repeat;
-  mask-size: 6% 10%;
+  mask-size: 6vmin 6vmin;
   transition:
-    transform 3600ms cubic-bezier(0.22, 0.61, 0.21, 1),
     -webkit-mask-size 1450ms cubic-bezier(0.2, 0.74, 0.22, 1),
     mask-size 1450ms cubic-bezier(0.2, 0.74, 0.22, 1);
-  will-change: transform, mask-size;
-}
-
-.intro-screen--lens:not([data-phase="idle"]) .intro-artwork-layer--soft {
-  transform: translate3d(0, 0, 0) scale(1.018);
+  will-change: mask-size;
 }
 
 .intro-screen--lens:is(
@@ -604,9 +599,8 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
   [data-phase="actions"],
   [data-phase="ready"]
 ) .intro-artwork-layer--clear {
-  transform: scale(1);
-  -webkit-mask-size: 58% 94%;
-  mask-size: 58% 94%;
+  -webkit-mask-size: var(--intro-lens-size) var(--intro-lens-size);
+  mask-size: var(--intro-lens-size) var(--intro-lens-size);
 }
 
 .intro-optical-bloom,
@@ -620,11 +614,11 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 .intro-optical-bloom {
   z-index: 2;
   background:
-    radial-gradient(ellipse 31% 49% at 76% 46%, transparent 57%, rgba(244, 165, 160, 0.12) 68%, transparent 78%),
-    radial-gradient(ellipse 27% 44% at 76% 46%, rgba(255, 225, 211, 0.08), transparent 72%);
+    radial-gradient(ellipse 31% 49% at var(--intro-lens-x) var(--intro-lens-y), transparent 57%, rgba(244, 165, 160, 0.12) 68%, transparent 78%),
+    radial-gradient(ellipse 27% 44% at var(--intro-lens-x) var(--intro-lens-y), rgba(255, 225, 211, 0.08), transparent 72%);
   opacity: 0;
   transform: scale(0.86);
-  transform-origin: 76% 46%;
+  transform-origin: var(--intro-lens-x) var(--intro-lens-y);
   transition:
     opacity 1600ms ease,
     transform 1900ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -841,6 +835,9 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
 
 @media (max-width: 800px) {
   .intro-screen--lens {
+    --intro-lens-x: 73%;
+    --intro-lens-y: 23.5%;
+    --intro-lens-size: 104vw;
     min-height: 100svh;
     display: grid;
     grid-template-rows: minmax(270px, 43svh) auto;
@@ -848,37 +845,19 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
     padding: 1.5rem clamp(1.25rem, 5vw, 2.5rem) 2rem;
   }
 
-  .intro-screen--lens .intro-artwork-layer img { object-position: center; }
+  .intro-screen--lens .intro-artwork-layer img { object-position: center top; }
 
   .intro-screen--lens .intro-optical-bloom {
     background:
-      radial-gradient(ellipse 43% 23% at 72% 22%, transparent 57%, rgba(244, 165, 160, 0.11) 68%, transparent 78%),
-      radial-gradient(ellipse 39% 20% at 72% 22%, rgba(255, 225, 211, 0.07), transparent 72%);
-    transform-origin: 72% 22%;
+      radial-gradient(ellipse 43% 23% at var(--intro-lens-x) var(--intro-lens-y), transparent 57%, rgba(244, 165, 160, 0.11) 68%, transparent 78%),
+      radial-gradient(ellipse 39% 20% at var(--intro-lens-x) var(--intro-lens-y), rgba(255, 225, 211, 0.07), transparent 72%);
+    transform-origin: var(--intro-lens-x) var(--intro-lens-y);
   }
 
   .intro-screen--lens .intro-artwork-shade {
     background:
       linear-gradient(0deg, rgba(9, 5, 8, 0.99) 0%, rgba(10, 6, 9, 0.93) 32%, rgba(10, 6, 9, 0.36) 59%, rgba(8, 5, 7, 0.13) 100%),
       linear-gradient(90deg, rgba(8, 5, 7, 0.24), transparent 65%);
-  }
-
-  .intro-artwork-layer--clear {
-    -webkit-mask-position: 72% 22%;
-    -webkit-mask-size: 7% 4%;
-    mask-position: 72% 22%;
-    mask-size: 7% 4%;
-  }
-
-  .intro-screen--lens:is(
-    [data-phase="lens"],
-    [data-phase="headline"],
-    [data-phase="description"],
-    [data-phase="actions"],
-    [data-phase="ready"]
-  ) .intro-artwork-layer--clear {
-    -webkit-mask-size: 84% 42%;
-    mask-size: 84% 42%;
   }
 
   .intro-screen--lens .intro-copy {

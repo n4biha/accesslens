@@ -4,7 +4,10 @@ import { Check } from "lucide-react";
 import type { WorkflowStage } from "@/components/WorkflowContext";
 
 const PROGRESS = [
-  { number: 1, label: "New Analysis", target: "analyze", stages: ["analyze", "loading"] },
+  // Named for the stage, not the action: every other entry is a place you can
+  // stand ("Goal Lock", "Journey Scan"), so calling this one "New Analysis"
+  // made stepping back to it read as though it would discard your work.
+  { number: 1, label: "Assignment", target: "analyze", stages: ["analyze", "loading"] },
   { number: 2, label: "Goal Lock", target: "goal", stages: ["goal"] },
   { number: 3, label: "Journey Scan", target: "journey", stages: ["journey"] },
   { number: 4, label: "Friction", target: "barrier", stages: ["barrier"] },

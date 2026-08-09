@@ -61,9 +61,11 @@ export interface AnalyzeScreenProps {
   text: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  /** True once an analysis exists, so re-running is a replacement, not a first run. */
+  hasAnalysis?: boolean;
 }
 
-export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) {
+export function AnalyzeScreen({ text, onChange, onSubmit, hasAnalysis = false }: AnalyzeScreenProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
   const [fileNote, setFileNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -94,9 +96,13 @@ export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) 
   return (
     <main className="workflow-main">
       <ScreenHeading
-        eyebrow="New analysis"
-        title="Analyze a learning task"
-        subtitle="Paste an assignment, upload content, or provide an online learning experience."
+        eyebrow={hasAnalysis ? "Assignment" : "New analysis"}
+        title={hasAnalysis ? "Your assignment" : "Analyze a learning task"}
+        subtitle={
+          hasAnalysis
+            ? "Edit the text and re-analyse, or use the steps above to return to your results."
+            : "Paste an assignment, upload content, or provide an online learning experience."
+        }
       />
 
       <div className="analysis-grid">
@@ -143,8 +149,14 @@ export function AnalyzeScreen({ text, onChange, onSubmit }: AnalyzeScreenProps) 
             aria-describedby="prototype-note"
           />
           <div className="document-footer">
-            <p id="prototype-note">Analysed live · the sample assignment answers instantly</p>
-            <ArrowButton onClick={onSubmit} disabled={text.trim().length === 0 || reading}>Analyze task</ArrowButton>
+            <p id="prototype-note">
+              {hasAnalysis
+                ? "Re-analysing replaces your current results and repairs."
+                : "Analysed live · the sample assignment answers instantly"}
+            </p>
+            <ArrowButton onClick={onSubmit} disabled={text.trim().length === 0 || reading}>
+              {hasAnalysis ? "Re-analyse task" : "Analyze task"}
+            </ArrowButton>
           </div>
         </section>
 

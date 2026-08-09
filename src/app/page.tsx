@@ -217,7 +217,14 @@ export default function Home() {
         )}
 
         <div className="screen-enter" key={stage}>
-          {stage === "analyze" && <AnalyzeScreen text={assignmentDraft} onChange={setAssignmentDraft} onSubmit={submitAssignment} />}
+          {stage === "analyze" && (
+            <AnalyzeScreen
+              text={assignmentDraft}
+              onChange={setAssignmentDraft}
+              onSubmit={submitAssignment}
+              hasAnalysis={visited.has("journey")}
+            />
+          )}
           {stage === "loading" && <AnalysisLoadingScreen phase={loadingPhase} />}
           {stage === "goal" && <GoalLockScreen objective={objective} onEdit={setObjective} onLock={() => lockAndAnalyze(objective)} />}
           {stage === "journey" && (
