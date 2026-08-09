@@ -483,3 +483,15 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+.workflow-error {
+  max-width: 62rem;
+  margin: 1.25rem auto 0;
+  padding: 0.85rem 1.05rem;
+  border: 1px solid rgba(172, 63, 69, 0.28);
+  border-radius: 10px;
+  background: rgba(172, 63, 69, 0.07);
+  color: var(--danger);
+  font-size: 0.87rem;
+  line-height: 1.55;
+}

@@ -24,8 +24,22 @@ import {
 } from "@/components/WorkflowContext";
 import { runEngine } from "@/lib/engine";
 import { shortCitation } from "@/lib/standards";
-import type { FrictionMoment, Step } from "@/lib/schema";
+import {
+  AnalysisUnavailableError,
+  analyzeAssignment,
+  extractObjectives,
+} from "@/lib/analysisSource";
+import type { Analysis, FrictionMoment, Step } from "@/lib/schema";
 import { BIOLOGY_SAMPLE, BIOLOGY_TEXT } from "@/samples/biology";
+
+/** Keeps the loading sequence readable when a cached sample resolves instantly. */
+const MIN_LOADING_MS = 2400;
+
+function describeError(error: unknown): string {
+  if (error instanceof AnalysisUnavailableError) return error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return "Something went wrong analysing that assignment. Try again.";
+}
 
 const BIOLOGY_CONFIDENCE: AccessibilityScoreData = {
   score: 72,
@@ -54,17 +68,20 @@ const STATUS_LABEL: Record<WorkflowStage, string> = {
 export default function Home() {
   const [stage, setStage] = useState<WorkflowStage>("intro");
   const [assignmentDraft, setAssignmentDraft] = useState(BIOLOGY_TEXT);
+  const [analyzedText, setAnalyzedText] = useState(BIOLOGY_TEXT);
   const [objective, setObjective] = useState(BIOLOGY_SAMPLE.objectives[0].text);
+  const [baseAnalysis, setBaseAnalysis] = useState<Analysis>(BIOLOGY_SAMPLE.analysis);
   const [steps, setSteps] = useState<Step[]>(BIOLOGY_SAMPLE.analysis.steps);
   const [selectedFriction, setSelectedFriction] = useState<FrictionMoment>(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
   const [condition, setCondition] = useState<ConditionId>("working_memory");
   const [appliedRepairIds, setAppliedRepairIds] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const analysis = useMemo(
-    () => ({ ...BIOLOGY_SAMPLE.analysis, steps }),
-    [steps],
+    () => ({ ...baseAnalysis, steps }),
+    [baseAnalysis, steps],
   );
-  const report = useMemo(() => runEngine(analysis, BIOLOGY_TEXT), [analysis]);
+  const report = useMemo(() => runEngine(analysis, analyzedText), [analysis, analyzedText]);
 
   const selectedStep = useMemo(() => {
     const matched = selectedFriction.stepIds
@@ -72,13 +89,6 @@ export default function Home() {
       .filter((step): step is Step => Boolean(step));
     return matched.find((step) => step.repair !== null) ?? matched[0] ?? steps[0];
   }, [selectedFriction, steps]);
-
-  useEffect(() => {
-    if (stage === "loading") {
-      const timer = window.setTimeout(() => setStage("goal"), 3100);
-      return () => window.clearTimeout(timer);
-    }
-  }, [stage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -105,22 +115,59 @@ export default function Home() {
     addRepair(stepId);
   }
 
-  function submitDemo() {
-    setSteps(BIOLOGY_SAMPLE.analysis.steps);
-    setObjective(BIOLOGY_SAMPLE.objectives[0].text);
-    setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+  /** Reads the assignment and proposes a learning objective for the educator to lock. */
+  async function submitAssignment() {
+    const text = assignmentDraft;
+    setError(null);
     setAppliedRepairIds([]);
     setCondition("working_memory");
     setStage("loading");
+
+    try {
+      const [objectives] = await Promise.all([
+        extractObjectives(text),
+        new Promise((resolve) => setTimeout(resolve, MIN_LOADING_MS)),
+      ]);
+      setAnalyzedText(text);
+      setObjective(objectives[0]?.text ?? "");
+      setStage("goal");
+    } catch (err) {
+      setError(describeError(err));
+      setStage("analyze");
+    }
+  }
+
+  /** Locks the objective, then analyses the task against it. */
+  async function lockAndAnalyze(lockedObjective: string) {
+    setObjective(lockedObjective);
+    setError(null);
+    setStage("loading");
+
+    try {
+      const [result] = await Promise.all([
+        analyzeAssignment(analyzedText, lockedObjective),
+        new Promise((resolve) => setTimeout(resolve, MIN_LOADING_MS)),
+      ]);
+      setBaseAnalysis(result);
+      setSteps(result.steps);
+      setSelectedFriction(result.frictionMoments[0] ?? BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+      setStage("journey");
+    } catch (err) {
+      setError(describeError(err));
+      setStage("goal");
+    }
   }
 
   function startOver() {
     setAssignmentDraft(BIOLOGY_TEXT);
+    setAnalyzedText(BIOLOGY_TEXT);
     setObjective(BIOLOGY_SAMPLE.objectives[0].text);
+    setBaseAnalysis(BIOLOGY_SAMPLE.analysis);
     setSteps(BIOLOGY_SAMPLE.analysis.steps);
     setAppliedRepairIds([]);
     setCondition("working_memory");
     setSelectedFriction(BIOLOGY_SAMPLE.analysis.frictionMoments[0]);
+    setError(null);
     setStage("analyze");
   }
 
@@ -147,10 +194,16 @@ export default function Home() {
         <AppNav stage={stage} />
         <p className="sr-only" aria-live="polite">{STATUS_LABEL[stage]}</p>
 
+        {error && (
+          <p role="alert" className="workflow-error">
+            {error}
+          </p>
+        )}
+
         <div className="screen-enter" key={stage}>
-          {stage === "analyze" && <AnalyzeScreen text={assignmentDraft} onChange={setAssignmentDraft} onSubmit={submitDemo} />}
+          {stage === "analyze" && <AnalyzeScreen text={assignmentDraft} onChange={setAssignmentDraft} onSubmit={submitAssignment} />}
           {stage === "loading" && <AnalysisLoadingScreen />}
-          {stage === "goal" && <GoalLockScreen objective={objective} onEdit={setObjective} onLock={() => setStage("journey")} />}
+          {stage === "goal" && <GoalLockScreen objective={objective} onEdit={setObjective} onLock={() => lockAndAnalyze(objective)} />}
           {stage === "journey" && (
             <>
               <JourneyScan analysis={analysis} report={report} />
@@ -168,7 +221,7 @@ export default function Home() {
           )}
           {stage === "barrier" && (
             <BarrierTrace
-              assignmentText={BIOLOGY_TEXT}
+              assignmentText={analyzedText}
               step={selectedStep}
               friction={selectedFriction}
               citation={shortCitation(selectedFriction.barrierType)}
