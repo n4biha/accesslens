@@ -183,6 +183,49 @@ button, summary, label:has(input) { -webkit-tap-highlight-color: transparent; }
   outline: none;
 }
 
+.brain-scene-aura {
+  position: absolute;
+  z-index: 0;
+  inset: 2% 8% 8%;
+  overflow: hidden;
+  border-radius: 49% 49% 42% 42%;
+  background:
+    radial-gradient(circle at 18% 34%, rgba(193, 83, 93, 0.42) 0 1.5px, transparent 2.5px),
+    radial-gradient(circle at 82% 28%, rgba(210, 103, 107, 0.38) 0 2px, transparent 3px),
+    radial-gradient(circle at 88% 68%, rgba(188, 77, 88, 0.33) 0 1.5px, transparent 2.5px),
+    radial-gradient(circle at 16% 74%, rgba(217, 128, 118, 0.34) 0 2px, transparent 3px),
+    radial-gradient(ellipse at 50% 40%, rgba(231, 164, 155, 0.38), rgba(248, 211, 200, 0.22) 49%, transparent 72%);
+  filter: saturate(0.82);
+  pointer-events: none;
+}
+
+.brain-scene-aura::before {
+  content: "";
+  position: absolute;
+  inset: 2% 17% 13%;
+  border-radius: 48% 48% 44% 44%;
+  background: linear-gradient(155deg, rgba(255, 239, 231, 0.15), rgba(218, 130, 132, 0.2));
+  box-shadow: inset 0 0 55px rgba(255, 248, 242, 0.44), 0 0 70px rgba(191, 99, 105, 0.1);
+  transform: rotate(5deg);
+}
+
+.brain-scene-aura::after {
+  content: "";
+  position: absolute;
+  inset: 13% 22% 22%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255, 232, 220, 0.44) 0 1px, transparent 2px),
+    radial-gradient(circle at 65% 22%, rgba(179, 86, 96, 0.3) 0 1px, transparent 2px),
+    radial-gradient(circle at 73% 68%, rgba(255, 226, 211, 0.34) 0 1px, transparent 2px),
+    radial-gradient(circle at 28% 72%, rgba(185, 91, 99, 0.24) 0 1px, transparent 2px);
+  background-size: 43px 43px, 57px 57px, 68px 68px, 79px 79px;
+  mask-image: radial-gradient(circle, #000 22%, transparent 76%);
+  opacity: 0.72;
+}
+
+.brain-canvas-frame canvas { z-index: 1; }
+
 .brain-canvas-frame:active { cursor: grabbing; }
 .brain-canvas-frame canvas { position: relative; opacity: 0; transition: opacity 420ms ease; }
 .brain-canvas-frame.is-ready canvas { opacity: 1; }

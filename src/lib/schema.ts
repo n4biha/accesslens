@@ -183,7 +183,7 @@ export const analysisSchema = z.object({
     .number()
     .nullable()
     .describe(
-      "Any time limit the assignment imposes, in minutes. Null when the assignment is untimed."
+      "A deadline the student must finish work within, in minutes — for example a quiz timer or a session that closes. Null when no such limit exists. This is NOT the length of an artefact the student produces: a three-minute recording, a four-minute presentation, or a twenty-minute video to watch are durations, not limits, and must leave this null."
     ),
   steps: z.array(stepSchema).describe(
     "The complete sequence of actions a student performs, in order, from opening the assignment to submitting it."

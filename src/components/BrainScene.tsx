@@ -27,6 +27,23 @@ const MIN_POLAR_ANGLE = 0.72;
 const MAX_POLAR_ANGLE = 2.42;
 const ROTATION_STEP = Math.PI / 12;
 const TILT_STEP = Math.PI / 18;
+const NEURAL_NODES: [number, number, number, number][] = [
+  [-0.94, 0.53, 0.91, 0.024], [-0.55, 0.69, 1.02, 0.021], [0.2, 0.75, 0.92, 0.025],
+  [0.86, 0.72, 0.72, 0.018], [-0.4, -0.7, 0.79, 0.021], [0.02, -0.72, 0.92, 0.024],
+  [0.58, -0.58, 0.88, 0.019], [-0.3, 0.02, 1.23, 0.026], [0.62, 0.2, 1.08, 0.022],
+  [-1.2, 0.52, 0.7, 0.015], [-0.72, 0.78, 0.83, 0.017], [-0.02, 0.86, 0.78, 0.015],
+  [0.72, 0.83, 0.67, 0.018], [1.23, -0.08, 0.73, 0.015], [-0.78, -0.74, 0.7, 0.016],
+  [0.36, -0.8, 0.76, 0.017], [0.99, -0.62, 0.7, 0.014],
+];
+const AMBIENT_POINTS: [number, number, number, number][] = [
+  [-1.92, 0.82, 0.15, 0.015], [-1.7, -0.72, 0.62, 0.021], [-1.42, 1.12, -0.35, 0.012],
+  [-1.18, -1.02, -0.2, 0.014], [-0.65, 1.43, 0.18, 0.017], [-0.22, -1.28, 0.52, 0.011],
+  [0.38, 1.38, -0.25, 0.013], [0.82, -1.08, 0.45, 0.019], [1.22, 1.04, 0.32, 0.014],
+  [1.5, -0.64, -0.28, 0.012], [1.82, 0.54, 0.22, 0.022], [1.96, -0.04, -0.4, 0.011],
+  [-1.55, 0.18, 0.82, 0.009], [-1.34, 0.92, 0.43, 0.012], [-1.04, -0.88, 0.75, 0.01],
+  [-0.52, 1.18, 0.72, 0.008], [-0.14, -1.06, 0.9, 0.011], [0.42, 1.18, 0.75, 0.01],
+  [0.92, -0.92, 0.72, 0.008], [1.28, 0.82, 0.62, 0.012], [1.48, -0.24, 0.8, 0.009],
+];
 
 function useReducedMotion() {
   const [reduced, setReduced] = useState(() =>
@@ -70,6 +87,37 @@ class SceneErrorBoundary extends Component<{ children: ReactNode }, { failed: bo
   render() {
     return this.state.failed ? null : this.props.children;
   }
+}
+
+function NeuralDetails() {
+  return (
+    <group renderOrder={3}>
+      {NEURAL_NODES.map(([x, y, z, radius], index) => (
+        <mesh key={index} position={[x, y, z]}>
+          <sphereGeometry args={[radius, 12, 12]} />
+          <meshBasicMaterial color="#ffe7da" toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function SurroundingDetails() {
+  return (
+    <group>
+      {AMBIENT_POINTS.map(([x, y, z, radius], index) => (
+        <mesh key={index} position={[x, y, z]}>
+          <sphereGeometry args={[radius, 10, 10]} />
+          <meshBasicMaterial
+            color={index % 3 === 0 ? "#bd6870" : "#ffe9dc"}
+            transparent
+            opacity={index % 3 === 0 ? 0.65 : 0.85}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
 }
 
 function BrainModel({
@@ -124,22 +172,25 @@ function BrainModel({
           receiveShadow
         >
           <meshPhysicalMaterial
-            color="#f0bcb6"
-            roughness={0.3}
+            color="#e2aaa6"
+            roughness={0.2}
             metalness={0}
-            transmission={0.035}
-            thickness={0.42}
-            ior={1.4}
-            clearcoat={0.9}
-            clearcoatRoughness={0.18}
-            specularIntensity={0.72}
-            specularColor="#fff7f2"
-            sheen={0.48}
-            sheenRoughness={0.46}
-            sheenColor="#ffd9d3"
+            transmission={0.19}
+            thickness={0.76}
+            ior={1.44}
+            clearcoat={1}
+            clearcoatRoughness={0.09}
+            specularIntensity={0.9}
+            specularColor="#fff1eb"
+            sheen={0.5}
+            sheenRoughness={0.36}
+            sheenColor="#fbc5c1"
+            attenuationColor="#c4777a"
+            attenuationDistance={2.35}
           />
         </mesh>
       </group>
+      <NeuralDetails />
     </group>
   );
 }
@@ -161,13 +212,13 @@ function Scene({
 }) {
   return (
     <>
-      <ambientLight intensity={0.9} />
-      <hemisphereLight args={["#fffaf5", "#d7a7a2", 1.35]} />
+      <ambientLight intensity={0.84} />
+      <hemisphereLight args={["#fffaf5", "#c68a89", 1.26]} />
       <directionalLight position={[-4.5, 5, 4]} intensity={3.2} color="#fff2e9" />
-      <directionalLight position={[4, 2, -3]} intensity={2.1} color="#ef92a1" />
+      <directionalLight position={[4, 2, -3]} intensity={2.2} color="#e78491" />
       <pointLight position={[-2.8, 0.5, 3.8]} intensity={7} color="#ffe1d8" />
 
-      <Environment resolution={128} frames={1} environmentIntensity={0.62}>
+      <Environment resolution={128} frames={1} environmentIntensity={0.66}>
         <Lightformer
           form="rect"
           intensity={2.2}
@@ -202,13 +253,19 @@ function Scene({
         />
       </Suspense>
 
-      <mesh position={[0, -1.3, 0]} receiveShadow>
-        <cylinderGeometry args={[1.5, 1.62, 0.12, 72]} />
-        <meshPhysicalMaterial color="#f8e8e3" roughness={0.67} clearcoat={0.22} />
+      <SurroundingDetails />
+
+      <mesh position={[0, -1.34, 0]} receiveShadow>
+        <cylinderGeometry args={[1.58, 1.68, 0.18, 72]} />
+        <meshPhysicalMaterial color="#f5e2dc" roughness={0.7} clearcoat={0.24} />
       </mesh>
-      <mesh position={[0, -1.225, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[1.2, 0.018, 12, 96]} />
-        <meshStandardMaterial color="#d77f8c" roughness={0.42} emissive="#9f4355" emissiveIntensity={0.06} />
+      <mesh position={[0, -1.225, 0]} receiveShadow>
+        <cylinderGeometry args={[1.36, 1.42, 0.08, 72]} />
+        <meshPhysicalMaterial color="#fff4ef" roughness={0.34} clearcoat={0.66} clearcoatRoughness={0.2} />
+      </mesh>
+      <mesh position={[0, -1.176, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[1.18, 0.017, 12, 96]} />
+        <meshStandardMaterial color="#df8c91" roughness={0.32} emissive="#b94f60" emissiveIntensity={0.08} />
       </mesh>
       <ContactShadows
         position={[0, -1.22, 0]}
@@ -313,6 +370,7 @@ export default function BrainScene() {
       onKeyDown={handleKeyDown}
     >
       <div className="brain-static-fallback" aria-hidden="true" />
+      <div className="brain-scene-aura" aria-hidden="true" />
       {webglAvailable ? (
         <SceneErrorBoundary>
           <Canvas
