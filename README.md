@@ -81,7 +81,11 @@ Assignment text
 [7] Revised assignment + exportable summary
 ```
 
-The model never produces a number. It turns prose into a typed graph, and that is all. Every figure an educator sees is computed by `src/lib/engine.ts` from that graph. Same graph in, same numbers out. That reproducibility is what lets a barrier report cite a measurement instead of an opinion.
+The model observes. It does not measure. It turns prose into a typed graph: what happens at each step, what information that step produces, whether it stays on screen, and a 0-3 rating of each demand in isolation. It also copies across what the assignment states outright, like a stated word count or a twelve-minute limit.
+
+Every aggregate figure is computed from that graph by `src/lib/engine.ts`, with no model involvement. Peak memory load, carry distance, transition counts, required minutes, the readability grade and the score are all derived in code. Same graph in, same numbers out. That reproducibility is what lets a barrier report cite a measurement instead of an opinion.
+
+The difference matters most when the two disagree. The model rated one step's working memory a 3 in isolation. The engine traced three values from the simulation where they were produced, through the tab close and the quiz, and found four live at once against a capacity of four. The second number is the one an educator can check, because the reasoning behind it is a function they can read.
 
 ### The measurements
 
