@@ -13,22 +13,22 @@ type IntroPhase =
   | "actions"
   | "ready";
 
-const heroImageCommon = { alt: "", sizes: "100vw" } as const;
+const heroImageCommon = { alt: "", sizes: "100vw", quality: 100 } as const;
 const {
   props: { srcSet: desktopHeroSrcSet, ...desktopHeroProps },
 } = getImageProps({
   ...heroImageCommon,
-  src: "/accesslens-hero-v2.png",
-  width: 1672,
-  height: 941,
+  src: "/accesslens-hero-v3.png",
+  width: 3344,
+  height: 1882,
 });
 const {
   props: { srcSet: mobileHeroSrcSet },
 } = getImageProps({
   ...heroImageCommon,
-  src: "/accesslens-hero-mobile.png",
-  width: 941,
-  height: 1672,
+  src: "/accesslens-hero-mobile-v2.png",
+  width: 1882,
+  height: 3344,
 });
 
 function ResponsiveHeroImage({
@@ -151,15 +151,12 @@ export default function IntroScreen({ onEnter }: { onEnter: () => void }) {
       aria-busy={!sequenceComplete}
     >
       <div className="intro-artwork" aria-hidden="true">
-        <div className="intro-artwork-layer intro-artwork-layer--soft">
+        <div className="intro-artwork-layer intro-artwork-layer--sharp">
           <ResponsiveHeroImage
             eager
             onLoad={() => setAssetSettled(true)}
             onError={() => setAssetSettled(true)}
           />
-        </div>
-        <div className="intro-artwork-layer intro-artwork-layer--clear">
-          <ResponsiveHeroImage />
         </div>
         <div className="intro-optical-bloom" />
         <div className="intro-light-sweep" />
