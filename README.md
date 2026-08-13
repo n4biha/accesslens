@@ -38,7 +38,7 @@ That framing comes from Cognitive Load Theory (Sweller, 1988), which separates *
 
 ### Why this matters now
 
-The Department of Justice's ADA Title II final rule (April 2024) requires web content at state and local government entities to conform to WCAG 2.1 AA, with the first compliance deadline on **April 24, 2026** for entities serving 50,000 or more people. That covers public schools, community colleges and state universities. Institutions are auditing content right now. None of the tools doing that auditing look at the task layer.
+The Department of Justice's ADA Title II final rule (April 2024) requires web content at state and local government entities to conform to WCAG 2.1 AA. On 20 April 2026 the DOJ extended the deadlines by a year, to **26 April 2027** for entities serving 50,000 or more people and 26 April 2028 for smaller ones, citing overestimated institutional capacity in staffing and technology. That covers public schools, community colleges and state universities, and the technical standard did not change. Institutions are auditing content now against a deadline that is close enough to budget for. None of the tools doing that auditing look at the task layer.
 
 ### Where existing tools stop
 
